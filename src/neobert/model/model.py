@@ -78,6 +78,204 @@ class NeoBERTConfig(PretrainedConfig):
         self.kwargs = kwargs
 
 
+
+class Expert(nn.Module):
+# ATTENTION A LA CONFIG QUI OIT ETRE NEOBERTCONFIG
+    """An FFN -based module that processes the input and returns an output."""
+     """
+        Initialize an expert. An expert is a FFN-based module that processes the input
+        and returns an output. Architecture based on Mixtral
+
+        :param: config: The configuration for the model.
+        :param: expert_size The dimension of the hidden layer of the FFN.
+        """
+    def __init__(self, config: Config, expert_size: int,) -> None:
+        super().__init__()
+        self.identity = expert_size == 0
+
+        if not self.identity:
+            self.ffn = SwiGLU(config.hidden_size, expert_size, config.hidden_size, bias=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+#ATTENTION AU SELF.IDENTITY
+        if self.identity:
+            return x
+        x = self.ffn(x)
+        return x
+
+
+class MoEBlock(nn.Module):
+    """
+    A cost-based router, which uses a linear layer to route the input to the experts based on
+    the active task and the previous layer's output.
+    """
+
+    def __init__(
+        self,
+        config: Config,
+        expert_dims: list[int],
+    ) -> None:
+        """
+        Initialize a cost-based router. A cost-based router is a router that uses a
+        cost-based routing algorithm to route the input to the experts.
+
+        :param: config: The configuration for the model.
+        :param: expert_dims: The dimensions of the experts in this router.
+        """
+
+        super().__init__()
+
+        self.config = config
+        self.expert_dims = expert_dims
+        self.num_experts = len(expert_dims)
+        self.topk_training = config.num_experts_per_tok_training
+        self.topk_inference = config.num_experts_per_tok_inference
+
+
+        self.gate = nn.Linear(config.n_embd, len(expert_dims))
+        
+        self.experts = nn.ModuleList(
+            [Expert(config, expert_dim) for expert_dim in expert_dims],
+        )
+        self.jitter_noise = config.router_jitter_noise
+
+    #@torch.autocast(device_type="cuda", dtype=torch.float32) #probably useless given we use autocast in training loop
+
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        #task_ids: torch.Tensor,
+        *,
+        inference: bool = False,
+        inference_dropout_threshold: float | None = None,
+        inference_disable_complex_experts: bool = False,
+        output_activations: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        """
+        Forward pass of the cost-based router.
+
+        :param: hidden_states: The output of the previous layer in the model.
+        :param: inference: Whether to run the router in inference mode.
+        :param: inference_dropout_threshold: If set when running in inference mode,
+            experts with a routing weight below this threshold will be disabled.
+        :param: inference_disable_complex_experts: If set to true when running in
+            inference mode, the most complex expert in each layer will be disabled.
+        :return: A tuple containing the raw router output, the router output, the
+            indices of the experts to activate, and the mean expert usage loss.
+
+        """
+        #add jitter
+        hidden_states_shape = hidden_states.shape
+        if self.training and self.jitter_noise > 0:
+            hidden_states *= torch.empty_like(hidden_states).uniform_(1.0 - self.jitter_noise, 1.0 + self.jitter_noise)
+        hidden_states = hidden_states.view(-1, hidden_states_shape[-1])
+
+        # router_logits: (batch * sequence_length, n_experts)
+        router_logits = self.gate(hidden_states)
+        routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
+        raw_routing_weights = routing_weights.clone()
+
+        #compute expert usage loss 
+        mean_expert_usage_loss = self._MoEBlockRoutingCost(raw_routing_weights)
+
+        #if training, apply expert dropout and update routing weights
+        if self.training:
+            routing_weights = self._RoutingWeightsWithExpertDropout(router_logits,routing_weights)
+        
+        #Perform top k routing
+
+        if self.training:
+            top_k = self.topk_training
+        else: 
+            top_k = self.topk_inference
+        
+        final_hidden_states = self._top_k_routing(hidden_states, hidden_states_shape, routing_weights,top_k)
+
+
+        return final_hidden_states, raw_routing_weights, mean_expert_usage_loss #will probably stop outputing raw_routing_weights in future
+
+
+    def _RoutingWeightsWithExpertDropout(self, router_logits, routing_weights):
+
+        if (self.config.dropout_max_prob is not None
+                and self.config.dropout_router_weight_threshold is not None
+        ):
+
+            mask = (routing_weights < self.config.dropout_router_weight_threshold) & (
+                    torch.rand_like(routing_weights)
+                    < (
+                        self.config.dropout_max_prob
+                        - (
+                            self.config.dropout_max_prob
+                            / self.config.dropout_router_weight_threshold
+                        )
+                        * routing_weights
+                    )
+                )
+        
+            router_logits = torch.where(mask, float("-inf"), router_logits)
+            routing_weights = F.softmax(router_logits, dim=-1)
+
+        else:
+            logger.warning(
+                "Expert dropout was requested but `dropout_max_prob` or "
+                "`dropout_router_weight_threshold` not set. "
+                "Skipping expert dropout."
+            )
+    
+        return routing_weights
+    
+    def _MoEBlockRoutingCost(self,raw_routing_weights):
+
+        if len(self.expert_dims) > 1:
+
+            routing_costs = torch.tensor(self.expert_dims,dtype=raw_routing_weights.dtype,
+                device=raw_routing_weights.device )**self.config.expert_cost_exponent
+            
+            # Compute usage loss per token: (batch_size * seq_len)    
+            expert_usage_loss = torch.einsum('ik,k->i', raw_routing_weights, routing_costs)
+
+            # Average over all tokens in the batch
+            mean_expert_usage_loss = expert_usage_loss.mean()
+        else:
+            mean_expert_usage_loss = None
+        return mean_expert_usage_loss
+    
+    def _top_k_routing(self, hidden_states,hidden_states_shape,routing_weights,top_k):
+
+            batch_size, sequence_length,hidden_dim = hidden_states_shape
+
+            routing_weights, selected_experts = torch.topk(routing_weights, top_k, dim=-1)
+            routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+            # we cast back to the input dtype
+            routing_weights = routing_weights.to(hidden_states.dtype)
+
+            final_hidden_states = torch.zeros(
+                (batch_size * sequence_length, hidden_dim), dtype=hidden_states.dtype, device=hidden_states.device
+            )
+
+            # One hot encode the selected experts to create an expert mask
+            # this will be used to easily index which expert is going to be sollicitated
+            expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes=self.num_experts).permute(2, 1, 0)
+
+            expert_hitted = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
+            for expert_idx in expert_hitted:
+                expert_layer = self.experts[expert_idx]
+                idx, top_x = torch.where(expert_mask[expert_idx].squeeze(0))
+                # Index the correct hidden states and compute the expert hidden state for
+                # the current expert. We need to make sure to multiply the output hidden
+                # states by `routing_weights` on the corresponding tokens (top-1 and top-2)
+                current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
+                current_hidden_states = expert_layer(current_state) * routing_weights[top_x, idx, None]
+
+                # However `index_add_` only support torch tensors for indexing so we'll use
+                # the `top_x` tensor here.
+                final_hidden_states.index_add_(0, top_x, current_hidden_states.to(hidden_states.dtype))
+            final_hidden_states = final_hidden_states.reshape(batch_size, sequence_length, hidden_dim)
+            return final_hidden_states
+
+
 class EncoderBlock(nn.Module):
     """Transformer encoder block."""
 
@@ -111,16 +309,24 @@ class EncoderBlock(nn.Module):
         self.attention_norm = (
             RMSNorm(config.hidden_size, config.norm_eps) if config.rms_norm else nn.LayerNorm(config.hidden_size, config.norm_eps)
         )
-        self.ffn_norm = (
+        self.expert_norm = (
             RMSNorm(config.hidden_size, config.norm_eps) if config.rms_norm else nn.LayerNorm(config.hidden_size, config.norm_eps)
         )
 
         self.ffn_dropout = nn.Dropout(config.dropout)
 
+        self.block_moe = MoEBlock(
+            config,
+            expert_dims
+        )
+
     def forward(self, x: torch.Tensor, pad_mask: torch.Tensor, freqs_cis: torch.Tensor):
         x = x + self._att_block(self.attention_norm(x), pad_mask, freqs_cis)
-        x = x + self._ff_block(self.ffn_norm(x))
-        return x
+
+        moe_output = self.block_moe(x)
+
+        x = x + self._ff_block(self.expert_norm(moe_output[0]))
+        return (x,*moe_output[1:],)
 
     def _att_block(self, x: torch.Tensor, pad_mask: torch.Tensor, freqs_cis: torch.Tensor):
         batch_size, seq_len, _ = x.shape
@@ -311,16 +517,44 @@ class NeoBERT(NeoBERTPreTrainedModel):
             incremental_indices = (torch.cumsum(mask, dim=1).type_as(mask)) * mask  #
             incremental_indices = incremental_indices.long() + self.config.pad_token_id
             x += self.positional_embedding(incremental_indices)
-
+        
+        total_mean_expert_usage_loss = torch.tensor(0.0, device=src.device)
         # Transformer encoder
         for layer in self.transformer_encoder:
+            layer_output = layer(x, pad_mask, freqs_cis)
+            x = layer_output[0]
+            # router_logits = layer_output[1]
+            mean_expert_usage_loss = layer_output[2]
+
+            # if output_activations:
+            #     block_activations = layer_output[3]
+
+            if mean_expert_usage_loss is not None:
+                total_mean_expert_usage_loss += mean_expert_usage_loss
+                # for k in task_expert_usage_losses:
+                #     total__expert_usage_loss[k] = (
+                #         total_task_expert_usage_loss[k] + task_expert_usage_losses[k]
+                #     )
+
+            # if output_all_pathways:
+            #     expert_usages.append(router_logits.cpu().detach().numpy())
+
+            # if output_activations:
+            #     expert_activations.append(block_activations)
             x = layer(x, pad_mask, freqs_cis)
 
         # Final normalization layer
         x = self.layer_norm(x)
 
-        # Return the output of the last hidden layer
-        return x
+        output = (x,total_mean_expert_usage_loss)
+
+        # if output_all_pathways:
+        #     output += (expert_usages,)
+
+        # if output_activations:
+        #     output += (expert_activations,)
+
+        return output #ATTENTION ON A CHANGE LA FORME DE l'OUTPUT. MAINTENANT ON A AUSSI LA LOSS
 
 
 class NormNeoBERT(NeoBERTPreTrainedModel):
@@ -401,10 +635,34 @@ class NeoBERTLMHead(NeoBERTPreTrainedModel):
         self.post_init()
 
     def forward(self, src, pad_mask=None):
-        hidden_representation = self.model.forward(src, pad_mask)
+        hidden_representation,total_mean_expert_usage_loss = self.model.forward(src, pad_mask)
         logits = self.decoder(hidden_representation)
 
-        return {"hidden_representation": hidden_representation, "logits": logits}
+        return {"hidden_representation": hidden_representation, "logits": logits, "expert_usage_loss": total_mean_expert_usage_loss}
+
+#ATTENTION: on a changé les outputs
+class Expert(nn.Module):
+
+    def __init__(
+        self,
+        config: Config,
+        hidden_dim: int,
+    ) -> None:
+        super().__init__()
+
+        self.identity = hidden_dim == 0
+
+        if not self.identity:
+            self.swiglu= SwiGLU(config.n_embd, hidden_dim)
+            self.output_layer = nn.Linear(hidden_dim, config.n_embd)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        if self.identity:
+            return x
+        x = self.swiglu(x)
+        return self.output_layer(x)
+
 
 
 class NeoBERTForSequenceClassification(NeoBERTPreTrainedModel):
