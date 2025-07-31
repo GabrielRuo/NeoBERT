@@ -1,0 +1,10 @@
+router_jitter_noise: 1e-5
+num_experts_per_tok_training: 8
+num_experts_per_tok_inference: 2
+dropout_max_prob: None
+dropout_router_weight_threshold: None
+expert_cost_exponent: 2
+expert_sizes: "0,1536,3072"
+
+
+

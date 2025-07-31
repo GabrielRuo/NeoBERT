@@ -1,0 +1,6 @@
+# Mixture of pathways
+cost_based_loss_alpha: 1e-5
+cost_based_loss_epsilon: 1e-2
+disable_task_performance_scaling: False
+
+#HmoE
