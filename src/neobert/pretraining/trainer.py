@@ -155,6 +155,7 @@ def trainer(cfg: DictConfig):
     )
 
     # Loss function
+
     train_loss_fn = CrossEntropyLoss()
 
     # Resume from the latest checkpoint
@@ -203,8 +204,23 @@ def trainer(cfg: DictConfig):
             if metrics["train/batches"] % cfg.trainer.gradient_accumulation_steps != 0:
                 with accelerator.no_sync(model):
                     # Forward pass
-                    logits = model(batch["input_ids"], batch.get("attention_mask", None))["logits"]
-                    train_loss = train_loss_fn(logits.view(-1, cfg.tokenizer.vocab_size), batch["labels"].view(-1))
+                    model_output = model(batch["input_ids"], batch.get("attention_mask", None))
+                    logits = model_output['logits']
+                    expert_usage_loss = model_output['expert_usage_loss']
+                    
+                    train_loss = masked_lm_loss = train_loss_fn(logits.view(-1, cfg.tokenizer.vocab_size), batch["labels"].view(-1))
+
+                    if cfg.cost_based_loss_alpha > 0:
+                            loss_numerator = cfg.cost_based_loss_alpha * expert_usage_loss
+                            loss_denominator = cfg.cost_based_loss_epsilon + masked_lm_loss
+                            if cfg.disable_task_performance_scaling:
+                                train_loss = masked_lm_loss + loss_numerator
+                            else:
+                                train_loss = (
+                                    masked_lm_loss
+                                    + loss_numerator / loss_denominator
+                                )
+
 
                     # Compute gradient
                     accelerator.backward(train_loss)
