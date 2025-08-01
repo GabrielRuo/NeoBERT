@@ -67,7 +67,6 @@ def to_target_batch_size(
 
     return batch, stored_batch
 
-
 def trainer(cfg: DictConfig):
     # Get the last checkpoint id
     checkpoint_dir = os.path.join(cfg.trainer.dir, "checkpoints")
@@ -131,7 +130,7 @@ def trainer(cfg: DictConfig):
     elif accelerator.mixed_precision == "bf16":
         dtype_pad_mask = torch.bfloat16
 
-    if cfg.dataset.name == "CRAMMING_pile": #careful to have correct dataloader in pretraining.yaml cfg such that cfg.dataloader is CRAMMINGdataloader,  cfg.tokenizer is CRAMMINGtokenizer cfg.datacollator is CRAMMINGmlm_15
+    if cfg.dataset.name == "CRAMMING_pile": #careful to have correct configs in pretraining.yaml cfg such that cfg.dataloader is CRAMMINGdataloader,  cfg.tokenizer is CRAMMINGtokenizer cfg.datacollator is CRAMMINGmlm_15
         # Tokenizer
         tokenizer = get_tokenizerCRAMMING(cfg.tokenizer.tokenizer_parent_dir) 
 
