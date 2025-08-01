@@ -26,6 +26,8 @@ from ..tokenizer import get_tokenizer
 from ..optimizer import get_optimizer
 from ..scheduler import get_scheduler
 from ..dataloader import get_dataloader
+from ..datasetCRAMMING import get_datasetCRAMMING, get_tokenizerCRAMMING
+from ..dataloaderCRAMMING import get_dataloaderCRAMMING
 
 
 def to_target_batch_size(
@@ -129,14 +131,27 @@ def trainer(cfg: DictConfig):
     elif accelerator.mixed_precision == "bf16":
         dtype_pad_mask = torch.bfloat16
 
-    # Tokenizer
-    tokenizer = get_tokenizer(**cfg.tokenizer)
+    if cfg.dataset.name == "CRAMMING_pile": #careful to have correct dataloader in pretraining.yaml cfg such that cfg.dataloader is CRAMMINGdataloader,  cfg.tokenizer is CRAMMINGtokenizer cfg.datacollator is CRAMMINGmlm_15
+        # Tokenizer
+        tokenizer = get_tokenizerCRAMMING(cfg.tokenizer.tokenizer_parent_dir) 
 
-    # Dataset
-    train_dataset = load_from_disk(cfg.dataset.path_to_disk)
+        #Dataset
+        train_dataset = get_datasetCRAMMING( 
+            **cfg.dataset.train)
+        
+        #Dataloader
+        train_dataloader = get_dataloaderCRAMMING(train_dataset, tokenizer, **cfg.dataloader.train, **cfg.datacollator)
+        
+    else:
 
-    # Dataloader
-    train_dataloader = get_dataloader(train_dataset, tokenizer, dtype=dtype_pad_mask, **cfg.dataloader.train, **cfg.datacollator)
+        # Tokenizer
+        tokenizer = get_tokenizer(**cfg.tokenizer)
+
+        # Dataset
+        train_dataset = load_from_disk(cfg.dataset.path_to_disk)
+
+        # Dataloader
+        train_dataloader = get_dataloader(train_dataset, tokenizer, dtype=dtype_pad_mask, **cfg.dataloader.train, **cfg.datacollator)
 
     # Model
     model = NeoBERTLMHead(NeoBERTConfig(**cfg.model, **cfg.tokenizer, pad_token_id=tokenizer.pad_token_id))
