@@ -1,15 +1,18 @@
 defaults:
   - _self_
-  - dataset: refinedweb
-  - tokenizer: google
+  - dataset: CRAMMINGpile
+  - tokenizer: CRAMMINGtokenizer
   - model: 
     - neobert
     - 250M-opt
+    - mop
   - optimizer: adamw
   - scheduler: cosine_decay
-  - trainer: mlm
+  - trainer: 
+    - mlm
+    - losses
   - dataloader: base
-  - datacollator: mlm_20
+  - datacollator: mlm_15
 
 seed: 0
 
