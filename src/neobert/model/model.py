@@ -15,7 +15,11 @@ from torch.nn.functional import scaled_dot_product_attention
 from typing import Any, Dict, List, Optional
 from functools import partial
 
-from xformers.ops import SwiGLU, memory_efficient_attention
+# #ONLY for testing on cpu reasons
+# import torch._dynamo
+# torch._dynamo.config.suppress_errors = True
+
+from xformers.ops import SwiGLU, memory_efficient_attention  #DOES NOT WORK ON A NODE WITH NO GPU
 
 from datasets import Dataset
 
@@ -26,6 +30,19 @@ from tqdm import tqdm
 
 from .rmsnorm import RMSNorm
 from .rotary import precompute_freqs_cis, apply_rotary_emb
+
+# #FOR TESTING WITH NO GPU!
+# import torch.nn.functional as F
+# class SwiGLU(nn.Module):
+#     def __init__(self, in_dim: int, hidden_dim: int, out_dim: int, bias: bool = True):
+#         super().__init__()
+#         self.in_proj = nn.Linear(in_dim, hidden_dim * 2, bias=bias)
+#         self.out_proj = nn.Linear(hidden_dim, out_dim, bias=bias)
+
+#     def forward(self, x):
+#         x_proj = self.in_proj(x)
+#         x1, x2 = x_proj.chunk(2, dim=-1)
+#         return self.out_proj(F.silu(x1) * x2)
 
 
 class NeoBERTConfig(PretrainedConfig):
@@ -48,9 +65,17 @@ class NeoBERTConfig(PretrainedConfig):
         vocab_size: int = 32064,
         pad_token_id: int = 0,
         max_length: int = 1024,
-        flash_attention: bool = True,
+        flash_attention: bool = True, # SWITCH TO TRUE IN PRACTICE
         base_scale: float = 1.0 / (960.0**0.5),
         ngpt: bool = False,
+        #added attributes
+        router_jitter_noise = 1e-5,
+        num_experts_per_tok_training = 8,
+        num_experts_per_tok_inference = 2,
+        dropout_max_prob = None,
+        dropout_router_weight_threshold = None,
+        expert_cost_exponent = 2,
+        expert_sizes="0,1536,3072",
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -75,21 +100,29 @@ class NeoBERTConfig(PretrainedConfig):
         self.flash_attention = flash_attention
         self.base_scale = base_scale
         self.ngpt = ngpt
+        #Added modules
+        self.router_jitter_noise = router_jitter_noise
+        self.num_experts_per_tok_training = num_experts_per_tok_training 
+        self.num_experts_per_tok_inference = num_experts_per_tok_inference
+        self.dropout_max_prob = dropout_max_prob
+        self.dropout_router_weight_threshold = dropout_router_weight_threshold
+        self.expert_cost_exponent = expert_cost_exponent
+        self.expert_sizes = expert_sizes
         self.kwargs = kwargs
 
 
 
 class Expert(nn.Module):
-# ATTENTION A LA CONFIG QUI OIT ETRE NEOBERTCONFIG
+# ATTENTION A LA CONFIG QUI DOIT ETRE NEOBERTCONFIG
     """An FFN -based module that processes the input and returns an output."""
-     """
-        Initialize an expert. An expert is a FFN-based module that processes the input
-        and returns an output. Architecture based on Mixtral
-
-        :param: config: The configuration for the model.
-        :param: expert_size The dimension of the hidden layer of the FFN.
+    def __init__(self, config: NeoBERTConfig, expert_size: int,) -> None:
         """
-    def __init__(self, config: Config, expert_size: int,) -> None:
+    Initialize an expert. An expert is a FFN-based module that processes the input
+    and returns an output. Architecture based on Mixtral
+
+    :param: config: The configuration for the model.
+    :param: expert_size The dimension of the hidden layer of the FFN.
+    """
         super().__init__()
         self.identity = expert_size == 0
 
@@ -112,7 +145,7 @@ class MoEBlock(nn.Module):
 
     def __init__(
         self,
-        config: Config,
+        config: NeoBERTConfig,
         expert_dims: list[int],
     ) -> None:
         """
@@ -132,7 +165,7 @@ class MoEBlock(nn.Module):
         self.topk_inference = config.num_experts_per_tok_inference
 
 
-        self.gate = nn.Linear(config.n_embd, len(expert_dims))
+        self.gate = nn.Linear(config.hidden_size, len(expert_dims))
         
         self.experts = nn.ModuleList(
             [Expert(config, expert_dim) for expert_dim in expert_dims],
@@ -279,7 +312,7 @@ class MoEBlock(nn.Module):
 class EncoderBlock(nn.Module):
     """Transformer encoder block."""
 
-    def __init__(self, config: NeoBERTConfig):
+    def __init__(self, config: NeoBERTConfig, expert_dims:list[int]):
         super().__init__()
 
         self.config = config
@@ -487,7 +520,7 @@ class NeoBERT(NeoBERTPreTrainedModel):
 
         self.transformer_encoder = nn.ModuleList()
         for _ in range(config.num_hidden_layers):
-            self.transformer_encoder.append(EncoderBlock(config))
+            self.transformer_encoder.append(EncoderBlock(config,[int(expert_size) for expert_size in self.config.expert_sizes.split(",")]))
 
         self.layer_norm = (
             RMSNorm(config.hidden_size, config.norm_eps) if config.rms_norm else nn.LayerNorm(config.hidden_size, config.norm_eps)
@@ -541,7 +574,7 @@ class NeoBERT(NeoBERTPreTrainedModel):
 
             # if output_activations:
             #     expert_activations.append(block_activations)
-            x = layer(x, pad_mask, freqs_cis)
+            
 
         # Final normalization layer
         x = self.layer_norm(x)
@@ -641,29 +674,6 @@ class NeoBERTLMHead(NeoBERTPreTrainedModel):
         return {"hidden_representation": hidden_representation, "logits": logits, "expert_usage_loss": total_mean_expert_usage_loss}
 
 #ATTENTION: on a changé les outputs
-class Expert(nn.Module):
-
-    def __init__(
-        self,
-        config: Config,
-        hidden_dim: int,
-    ) -> None:
-        super().__init__()
-
-        self.identity = hidden_dim == 0
-
-        if not self.identity:
-            self.swiglu= SwiGLU(config.n_embd, hidden_dim)
-            self.output_layer = nn.Linear(hidden_dim, config.n_embd)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-
-        if self.identity:
-            return x
-        x = self.swiglu(x)
-        return self.output_layer(x)
-
-
 
 class NeoBERTForSequenceClassification(NeoBERTPreTrainedModel):
 
