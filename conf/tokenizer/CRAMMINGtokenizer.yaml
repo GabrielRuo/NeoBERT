@@ -1,1 +1,2 @@
-tokenizer_parent_dir = .
+tokenizer_parent_dir: .
+vocab_size: 32768

@@ -1,5 +1,5 @@
 from transformers import DataCollatorForLanguageModeling
-
+import torch
 
 def get_collatorCRAMMING(tokenizer, mlm_probability: float):
     """
@@ -13,8 +13,17 @@ def get_collatorCRAMMING(tokenizer, mlm_probability: float):
     Returns:
         A collator instance.
     """
-    return DataCollatorForLanguageModeling(
+    dtype = torch.float32
+
+    mlm_collator = DataCollatorForLanguageModeling(
         tokenizer=tokenizer,
         mlm=True,
         mlm_probability=mlm_probability
     )
+    def collate_fn(batch):
+                batch = mlm_collator(batch)
+                batch['attention_mask'] = None
+                #batch["attention_mask"] = torch.where(batch["attention_mask"] == 1, float(0.0), float("-inf")).type(dtype)
+                return batch
+    
+    return collate_fn

@@ -1,5 +1,5 @@
 tf32: True
-mixed_precision: bf16
+mixed_precision: fp16
 resume: True
 disable_tqdm: False
 max_steps: 1000000
@@ -11,4 +11,5 @@ accelerate:
 model:
   save_steps: 10000
   max_ckpt: 1000
-dir: logs/checkpoints
+dir: /runs/logs/checkpoints
+save_model: False

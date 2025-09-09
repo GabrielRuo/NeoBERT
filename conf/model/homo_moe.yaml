@@ -1,0 +1,9 @@
+type: "homo_moe"
+router_jitter_noise: 1e-5 #attention à utiliser num_experts_per_tok_training ou num_experts_per_tok_inference
+routing_strategy: 'top_k'
+num_experts_per_tok_training: 2 #must be smaller than number of experts of course
+num_experts_per_tok_inference: 2
+expert_sizes: '768,768,768,768,768,768,768,768'
+apply_expert_dropout: False
+loss:
+  load_balancing_loss_coeff: 1e-2 #https://arxiv.org/pdf/2403.07652

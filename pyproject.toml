@@ -19,10 +19,12 @@ dependencies = [
     "numpy==1.26.*",
     "scikit-learn==1.5.*",
     "evaluate==0.4.*",
+    "peft>=0.11.1,<0.12.0",
     "mteb",
     "libaio",
     "tqdm",
     "einops",
+    "pandas",
 ]
 authors = [
     { name = "Lola Le Breton", email = "lola.lebreton@mila.quebec" },
@@ -32,9 +34,21 @@ maintainers = [
     { name = "Lola Le Breton", email = "lola.lebreton@mila.quebec" },
     { name = "Quentin Fournier", email = "quentin.fournier@mila.quebec" },
 ]
+
 readme = "README.md"
 license = { text = "MIT License" }
 keywords = []
 
+
 [project.optional-dependencies]
 dev = ["black", "pytest", "pytest-cov", "pytest-clarity", "xeger"]
+modal = [
+  "inquirer~=3.4.0",
+  "modal~=1.0.3",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]

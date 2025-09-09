@@ -1,10 +1,21 @@
+type: "mop"
 router_jitter_noise: 1e-5
+routing_strategy: 'top_k'
 num_experts_per_tok_training: 8
 num_experts_per_tok_inference: 2
-dropout_max_prob: None
-dropout_router_weight_threshold: None
+apply_expert_dropout: True
+dropout_max_prob: 0.8
+dropout_router_weight_threshold: 0.1
 expert_cost_exponent: 2
-expert_sizes: "0,1536,3072"
+expert_sizes: '0,504, 616, 728, 840, 952, 1064, 1176'
+loss:
+  cost_based_loss_alpha_start: 1e-10
+  cost_based_loss_alpha_end: 1e-8
+  cost_based_loss_schedule_tokens: 3000000
+  cost_based_loss_epsilon: 1e-5
+  disable_task_performance_scaling: False
+  
+
 
 
 

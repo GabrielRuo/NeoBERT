@@ -1,0 +1,15 @@
+name: glue_stsb
+column: text
+path_to_disk: tokenized_datasets/glue_stsb # not used due to caching
+train:
+  hf_path: glue
+  split: train
+  subset: stsb
+  num_samples: null
+  streaming: False
+validation:
+  hf_path: glue
+  split: validation
+  subset: stsb
+  num_samples: null
+  streaming: False

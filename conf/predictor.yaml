@@ -1,0 +1,32 @@
+defaults:
+  - _self_
+  - dataset: minipile_predictor
+  - optimizer: adamw
+  - trainer: routing_pred
+  - scheduler: cosine_decay
+  - dataloader: dataloader_predictor
+  - datacollator: base
+
+seed: 0
+
+saved_model:
+  base_path: /runs/logs/checkpoints/mop_2025-08-15_16-07-06/
+  checkpoint: mop_100
+
+hydra:
+  run:
+    dir: logs/hydra
+
+wandb:
+  resume: never
+  name: null
+  project: MoP
+  entity: g-ruault-centralesup-lec
+  tags: []
+  dir: logs/wandb
+  mode: online
+  log_interval: 100
+
+
+
+

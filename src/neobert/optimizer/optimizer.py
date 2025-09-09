@@ -3,7 +3,7 @@ from torch.optim import AdamW, Adam
 
 from accelerate.utils import DistributedType
 
-from .soap.soap import SOAP
+#from .soap.soap import SOAP
 
 
 def get_optimizer(model: torch.nn.Module, distributed_type: DistributedType, **kwargs) -> torch.optim.Optimizer:

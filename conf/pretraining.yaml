@@ -11,8 +11,8 @@ defaults:
   - trainer: 
     - mlm
     - losses
-  - dataloader: base
-  - datacollator: mlm_15
+  - dataloader: CRAMMINGdataloader
+  - datacollator: CRAMMINGmlm_15
 
 seed: 0
 
@@ -23,8 +23,8 @@ hydra:
 wandb:
   resume: never
   name: null
-  project: neo-bert
-  entity: sarath-chandar
+  project: MoP
+  entity: g-ruault-centralesup-lec
   tags: []
   dir: logs/wandb
   mode: online

@@ -1,0 +1,33 @@
+defaults:
+  - _self_
+  - dataset: minipile
+  - tokenizer: google_mini
+  - model: 
+    - neobert
+    - architecture_hetero_moe
+    - hetero_moe
+  - optimizer: adamw
+  - scheduler: cosine_decay
+  - trainer: 
+    - mlm
+  - dataloader: CRAMMINGdataloader
+  - datacollator: mlm_15
+
+seed: 0
+
+hydra:
+  run:
+    dir: logs/hydra
+
+wandb:
+  resume: never
+  name: null
+  project: MoP
+  entity: g-ruault-centralesup-lec
+  tags: []
+  dir: logs/wandb
+  mode: online
+  log_interval: 100
+
+
+
