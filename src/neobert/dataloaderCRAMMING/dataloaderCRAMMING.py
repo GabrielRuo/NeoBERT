@@ -14,7 +14,7 @@ def get_dataloaderCRAMMING(
     tokenizer: PreTrainedTokenizer,
     mlm_probability: float = 0.15,
     num_workers: int = 4,
-    batch_size: int = 64,
+    batch_size: int = 32,
     shuffle: bool = True,
     pin_memory: bool = False,
     persistent_workers: bool = True,

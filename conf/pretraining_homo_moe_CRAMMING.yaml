@@ -1,0 +1,33 @@
+defaults:
+  - _self_
+  - dataset: CRAMMINGpile
+  - tokenizer: CRAMMINGtokenizer
+  - model: 
+    - neobert
+    - architecture_homo_moe
+    - homo_moe
+  - optimizer: adamw
+  - scheduler: cosine_decay
+  - trainer: 
+    - mlm
+  - dataloader: CRAMMINGdataloader
+  - datacollator: CRAMMINGmlm_15
+
+seed: 0
+
+hydra:
+  run:
+    dir: logs/hydra
+
+wandb:
+  resume: never
+  name: null
+  project: MoP
+  entity: g-ruault-centralesup-lec
+  tags: []
+  dir: logs/wandb
+  mode: online
+  log_interval: 100
+
+
+

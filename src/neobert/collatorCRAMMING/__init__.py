@@ -1,3 +1,3 @@
-__all__ = ["get_datasetCRAMMING,get_tokenizerCRAMMING"]
+__all__ = ["get_collatorCRAMMING"]
 
-from .datasetCRAMMING import get_datasetCRAMMING,get_tokenizerCRAMMING
+from .collatorCRAMMING import get_collatorCRAMMING

@@ -17,7 +17,7 @@ class Metrics(defaultdict):
         for k, v in state_dict.items():
             self[k] = v
 
-    def log(self, accelerator: Accelerator):
+    def log(self, accelerator: Accelerator, model_type):
         # Aggregate ALL metrics across devices (only required for local counters!)
         metrics_agg = Tensor(list(self.values())).to(accelerator.device, non_blocking=True)
         metrics_agg = accelerator.reduce(metrics_agg, reduction="sum").detach().cpu().numpy()
@@ -35,10 +35,31 @@ class Metrics(defaultdict):
 
         if metrics_agg["train/local_num_pred"] > 0:
             metrics_log["train/loss"] = metrics_agg["train/local_sum_loss"] / metrics_agg["train/local_num_pred"]
+            metrics_log["train/mlm_loss"] = metrics_agg["train/local_sum_mlm_loss"] / metrics_agg["train/local_num_pred"]
+            del metrics_log["train/local_sum_mlm_loss"]
+            if model_type == "mop":
+                metrics_log["train/expert_loss"] = metrics_agg["train/local_sum_expert_loss"] / metrics_agg["train/local_num_pred"]
+                del metrics_log["train/local_sum_expert_loss"]
+            if model_type == "hetero_moe":
+                metrics_log["train/penalty_loss"] = metrics_agg["train/local_sum_penalty_loss"] / metrics_agg["train/local_num_pred"]
+                metrics_log["train/entropy_loss"] = metrics_agg["train/local_sum_entropy_loss"] / metrics_agg["train/local_num_pred"]
+                del metrics_log["train/local_sum_penalty_loss"]
+                del metrics_log["train/local_sum_entropy_loss"]
+            if model_type == "homo_moe":
+                metrics_log["train/load_balancing_loss"] = metrics_agg["train/local_sum_load_balancing_loss"] / metrics_agg["train/local_num_pred"]
+                del metrics_log["train/local_sum_load_balancing_loss"]
             metrics_log["train/perplexity"] = math.exp(metrics_log["train/loss"])
             metrics_log["train/accuracy"] = metrics_agg["train/local_num_correct"] / metrics_agg["train/local_num_pred"]
 
+            del metrics_log['train/steps']
+            del metrics_log['train/local_num_pred']
+            del metrics_log['train/local_num_correct']
+            del metrics_log['train/local_sum_loss']
+            del metrics_log['train/batches']
+            
+
         # Log the metrics
+        
         accelerator.log(metrics_log)
 
         # Reset the local counters

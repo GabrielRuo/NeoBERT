@@ -1,0 +1,10 @@
+name: crammingpile
+column: content
+path_to_disk: tokenized_datasets/CRAMMING_pile # not used due to caching
+train:
+  hf_path: JonasGeiping/the_pile_WordPiecex32768_8eb2d0ea9da707676c81314c4ea04507
+  split: train
+  num_samples: null
+  streaming: False
+
+

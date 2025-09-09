@@ -1,0 +1,13 @@
+name: minipile
+column: text
+path_to_disk: tokenized_datasets/mini_pile # not used due to caching
+train:
+  hf_path: JeanKaddour/minipile
+  split: train
+  num_samples: 10000
+  streaming: False
+test:
+  hf_path: JeanKaddour/minipile
+  split: test
+  num_samples: null
+  streaming: False
