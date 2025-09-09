@@ -276,8 +276,8 @@ def trainer(cfg: DictConfig):
                     if cfg.model.type == "mop":
                         num_masked_tokens = cfg.dataloader.train.batch_size * cfg.tokenizer.max_length * metrics["train/steps"]*cfg.datacollator.mlm_probability
                         model_output = model(batch["input_ids"], batch.get("attention_mask", None), output_expert_usage_loss=True, output_router_logits=False)
-                        #train_loss,mlm_loss,expert_loss, cost_based_loss_alpha = mop_loss_fn(model_output['logits'], model_output['expert_usage_loss'], cfg, batch, num_masked_tokens)
-                        train_loss,mlm_loss,expert_loss,cost_based_loss_alpha = mop_loss_fn_alt(model_output['logits'], model_output['router_logits'], cfg, batch, num_masked_tokens) 
+                        train_loss,mlm_loss,expert_loss, cost_based_loss_alpha = mop_loss_fn(model_output['logits'], model_output['expert_usage_loss'], cfg, batch, num_masked_tokens)
+                        #train_loss,mlm_loss,expert_loss,cost_based_loss_alpha = mop_loss_fn_alt(model_output['logits'], model_output['router_logits'], cfg, batch, num_masked_tokens) 
 
 
                     logits = model_output['logits']
