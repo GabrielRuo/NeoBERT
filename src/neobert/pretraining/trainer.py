@@ -105,7 +105,7 @@ def trainer(cfg: DictConfig):
         kwargs_handlers=[kwargs],
     )
 
-    #wandb_name = f"alpha:{cfg.model.loss.cost_based_loss_alpha}_n_samples:{cfg.dataset.train.num_samples}"
+    wandb_name = f"a_strt{cfg.model.loss.cost_based_loss_alpha_start:.1e}_a_end:{cfg.model.loss.cost_based_loss_alpha_end:.1e}_schedule{cfg.model.loss.cost_based_loss_schedule_tokens}_cst_exp:{cfg.model.expert_cost_exponent}"
 
     # Initialise the wandb run and pass wandb parameters
     os.makedirs(cfg.wandb.dir, exist_ok=True)
@@ -113,7 +113,7 @@ def trainer(cfg: DictConfig):
         project_name=cfg.wandb.project,
         init_kwargs={
             "wandb": {
-                "name": cfg.wandb.name,
+                "name": wandb_name,
                 "entity": cfg.wandb.entity,
                 "config": OmegaConf.to_container(cfg) | {"distributed_type": accelerator.distributed_type},
                 "tags": cfg.wandb.tags,
