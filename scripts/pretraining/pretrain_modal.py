@@ -8,12 +8,12 @@ def get_arg_value(key, cli_arguments=cli_arguments):
         if arg.startswith(f"{key}="):
             model_type_str =  arg.split("=", 1)[1].strip('"').strip("'")
             cli_overrides = cli_arguments[:arg_index] + cli_arguments[arg_index+1:]
-            if model_type_str in ["mop", "hetero_moe", "homo_moe"]:
+            if model_type_str in ["mop", "hetero_moe", "homo_moe", "neobert_original"]:
                 return model_type_str, cli_overrides
             else:
-                print("Error: invalid model type. Must be 'mop', 'hetero_moe', or 'homo_moe'")
+                print("Error: invalid model type. Must be 'mop', 'hetero_moe', 'homo_moe', or 'neobert_original'")
                 return None
-    print("Error: no model_type given. Must be 'mop', 'hetero_moe', or 'homo_moe'")
+    print("Error: no model_type given. Must be 'mop', 'hetero_moe', 'homo_moe', or 'neobert_original'")
     return None
 
 model_type, cli_overrides = get_arg_value("model_type", cli_arguments)
