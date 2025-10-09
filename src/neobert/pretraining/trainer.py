@@ -158,6 +158,8 @@ def trainer(cfg: DictConfig):
     if accelerator.is_main_process:
         time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         wandb.run.name = base_name + "_" + time_str
+        with open(os.path.join(model_dir, "wandb_run_name.txt"), "w") as f:
+                f.write(str(wandb.run.name))
 
 
     # Set the seed
@@ -169,6 +171,7 @@ def trainer(cfg: DictConfig):
 
     # Local and global counters
     metrics = Metrics()
+    metrics["model_run_dir_modal"] = model_dir
     analysistraining = AnalysisTraining(cfg, accelerator)
     # accelerator.register_for_checkpointing(metrics)
 
@@ -265,6 +268,8 @@ def trainer(cfg: DictConfig):
         else:
             os.makedirs(model_dir, exist_ok=True)
             OmegaConf.save(cfg, os.path.join(model_dir, "config.yaml"))
+            # Save wandb run name to a text file in model_dir
+            
 
     # # Add buffer for moving variance
     # moving_mean_buffer = []
