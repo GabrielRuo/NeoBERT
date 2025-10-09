@@ -5,6 +5,7 @@ __all__ = [
     "NeoBERT",
     "NeoBERTConfig",
     "NeoBERTForSequenceClassification",
+    "NeoBERTLMHeadOriginal",
 ]
 
 from .model import (
@@ -16,5 +17,6 @@ from .model import (
     NeoBERTForSequenceClassification,
     #MoEBlock
 )
+from .neobert_original import  NeoBERTLMHead as NeoBERTLMHeadOriginal
 
 
