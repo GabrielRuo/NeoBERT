@@ -19,9 +19,19 @@ class Metrics(defaultdict):
 
     def log(self, accelerator: Accelerator, model_type):
         # Aggregate ALL metrics across devices (only required for local counters!)
-        metrics_agg = Tensor(list(self.values())).to(accelerator.device, non_blocking=True)
+        # Separate scalar and non-scalar metrics: for instance, wandb Tables, plots, etc.
+        scalar_metrics = {}
+        non_scalar_metrics = {}
+
+        for k, v in self.items():
+            if isinstance(v, (int, float)):
+                scalar_metrics[k] = v
+            else:
+                non_scalar_metrics[k] = v   # wandb Tables, plots, etc.
+
+        metrics_agg = Tensor(list(scalar_metrics.values())).to(accelerator.device, non_blocking=True)
         metrics_agg = accelerator.reduce(metrics_agg, reduction="sum").detach().cpu().numpy()
-        metrics_agg = {k: v for k, v in zip(self.keys(), metrics_agg)}
+        metrics_agg = {k: v for k, v in zip(scalar_metrics.keys(), metrics_agg)}
 
         # Update global values
         self["train/samples"] = self["train/samples"] + metrics_agg["train/local_samples"]
