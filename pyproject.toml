@@ -25,6 +25,7 @@ dependencies = [
     "tqdm",
     "einops",
     "pandas",
+    "matplotlib",
 ]
 authors = [
     { name = "Lola Le Breton", email = "lola.lebreton@mila.quebec" },
