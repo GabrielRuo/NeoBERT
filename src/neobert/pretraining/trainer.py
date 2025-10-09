@@ -24,6 +24,7 @@ from accelerate.utils import DistributedDataParallelKwargs
 # Our metric object and model
 from .metrics import Metrics
 from ..model import NeoBERTLMHead, NeoBERTConfig
+from ..model import NeoBERTLMHeadOriginal
 from ..tokenizer import get_tokenizer
 from ..optimizer import get_optimizer
 from ..scheduler import get_scheduler
@@ -31,10 +32,12 @@ from ..dataloader import get_dataloader
 from ..datasetCRAMMING import get_datasetCRAMMING, get_tokenizerCRAMMING
 from ..dataset import get_dataset
 from ..dataloaderCRAMMING import get_dataloaderCRAMMING
+from ..analysis import AnalysisTraining
 
 #loss functions
-from .losses import mop_loss_fn, hetero_moe_loss_fn, homo_moe_loss_fn, mop_loss_fn_alt
-from .analysis import get_normalised_expert_usage_cost_per_sequence,get_entropy,get_mse_per_sequence
+from .losses import mop_loss_fn, hetero_moe_loss_fn, homo_moe_loss_fn #mop_loss_fn_alt
+
+import wandb
 
 def to_target_batch_size(
     batch: BatchEncoding,
@@ -77,10 +80,12 @@ def trainer(cfg: DictConfig):
     # Get the last checkpoint id
     time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     model_dir = os.path.join(cfg.trainer.dir,cfg.model.type +"_"+time_str)
+    #wandb_dir = os.path.join(model_dir, "wandb")
     checkpoint_dir = os.path.join(model_dir, "checkpoints")
     model_checkpoint_dir = os.path.join(model_dir, "model_checkpoints")
-    if cfg.trainer.save_model:
-        os.makedirs(model_checkpoint_dir, exist_ok=True)
+    # if cfg.trainer.save_model:
+    os.makedirs(model_checkpoint_dir, exist_ok=True)
+
 
     iteration = 0
     if cfg.trainer.resume and os.path.exists(checkpoint_dir) and len(os.listdir(checkpoint_dir)) > 0:
@@ -105,24 +110,55 @@ def trainer(cfg: DictConfig):
         kwargs_handlers=[kwargs],
     )
 
-    wandb_name = f"a_strt{cfg.model.loss.cost_based_loss_alpha_start:.1e}_a_end:{cfg.model.loss.cost_based_loss_alpha_end:.1e}_schedule{cfg.model.loss.cost_based_loss_schedule_tokens}_cst_exp:{cfg.model.expert_cost_exponent}"
+    def flatten_dict(d, parent_key="", sep="."):
+        items = {}
+        for k, v in d.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+            if isinstance(v, dict):
+                items.update(flatten_dict(v, new_key, sep=sep))
+            else:
+                items[new_key] = v
+        return items
 
-    # Initialise the wandb run and pass wandb parameters
-    os.makedirs(cfg.wandb.dir, exist_ok=True)
+    flat_cfg = flatten_dict(OmegaConf.to_container(cfg, resolve=True))
+
     accelerator.init_trackers(
         project_name=cfg.wandb.project,
         init_kwargs={
             "wandb": {
-                "name": wandb_name,
+                "name": "will_be_updated_later",
                 "entity": cfg.wandb.entity,
-                "config": OmegaConf.to_container(cfg) | {"distributed_type": accelerator.distributed_type},
+                "config": flat_cfg | {"distributed_type": accelerator.distributed_type},
                 "tags": cfg.wandb.tags,
-                "dir": cfg.wandb.dir,
+                "dir": model_dir,
                 "mode": cfg.wandb.mode,
                 "resume": cfg.wandb.resume,
             }
         },
     )
+    # for k, v in wandb.config.items():
+    #     print(k, v, type(v))
+
+    # #in case of sweeps
+    # # wandb_tracker = accelerator.get_tracker("wandb")
+    # for k, v in wandb.config.items():
+    #     if k == "distributed_type":
+    #         continue  # skip metadata keys
+    #     else:
+    #         OmegaConf.update(cfg, k, v, merge=True)
+
+    # print(cfg.model.loss.cost_based_loss_alpha_end)
+    # print(type(cfg.model.loss.cost_based_loss_alpha_end))
+
+    if cfg.model.type == "mop":
+        base_name = f"a_strt: {cfg.model.loss.cost_based_loss_alpha_start:.1e}_a_end: {cfg.model.loss.cost_based_loss_alpha_end:.1e}_scaling: {cfg.model.loss.alpha_scaling}_cst_exp:{cfg.model.expert_cost_exponent}"
+    else:
+        base_name = f"{cfg.model.type}"
+            
+    if accelerator.is_main_process:
+        time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        wandb.run.name = base_name + "_" + time_str
+
 
     # Set the seed
     set_seed(cfg.seed)
@@ -133,7 +169,9 @@ def trainer(cfg: DictConfig):
 
     # Local and global counters
     metrics = Metrics()
-    accelerator.register_for_checkpointing(metrics)
+    analysistraining = AnalysisTraining(cfg, accelerator)
+    # accelerator.register_for_checkpointing(metrics)
+
 
     # Get the dtype for the pad_mask
     dtype_pad_mask = torch.float32
@@ -182,7 +220,10 @@ def trainer(cfg: DictConfig):
 
     # Model
     
-    model = NeoBERTLMHead(NeoBERTConfig(**cfg.model, **cfg.tokenizer, pad_token_id=tokenizer.pad_token_id))
+    if cfg.model.type == 'neobert_original':
+        model = NeoBERTLMHeadOriginal(NeoBERTConfig(**cfg.model, **cfg.tokenizer, pad_token_id=tokenizer.pad_token_id))
+    else:
+        model = NeoBERTLMHead(NeoBERTConfig(**cfg.model, **cfg.tokenizer, pad_token_id=tokenizer.pad_token_id))
     accelerator.log({"model_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad)})
 
     # Optimizer and Scheduler
@@ -225,13 +266,13 @@ def trainer(cfg: DictConfig):
             os.makedirs(model_dir, exist_ok=True)
             OmegaConf.save(cfg, os.path.join(model_dir, "config.yaml"))
 
-    # Add buffer for moving variance
-    moving_mean_buffer = []
+    # # Add buffer for moving variance
+    # moving_mean_buffer = []
 
-    # Buffers for correlation analysis
-    mse_loss_buffer = []
-    expert_usage_buffer = []
-    buffer_size = 100
+    # # Buffers for correlation analysis
+    # mse_loss_buffer = []
+    # expert_usage_buffer = []
+    # buffer_size = 100
 
     while cfg.trainer.max_steps > metrics["train/steps"]:
         # Use skipped_train_dataloader the first epoch after resuming
@@ -261,11 +302,12 @@ def trainer(cfg: DictConfig):
             # Under the no_sync context manager, PyTorch will skip synchronizing the gradients when .backward() is
             # called, and the first call to .backward() outside this context manager will trigger the synchronization.
             # Accumulating manually gives more flexibility and is compatible with TPUs.
-            if metrics["train/batches"] % cfg.trainer.gradient_accumulation_steps != 0:
+            if metrics["train/batches"] % cfg.trainer.gradient_accumulation_steps != 0: # ATTENTION IN OUR CURRENT SETTINGS WE DO NOT USE GRADIENT ACCUMULATION HENCE THIS IS NEVER ENTERED
                 with accelerator.no_sync(model):
-                    # Forward pass
+                # Forward pass 
 
                 
+                    
                     
                     if cfg.model.type == "homo_moe":
                         model_output = model(batch["input_ids"], batch.get("attention_mask", None), output_expert_usage_loss=False, output_router_logits=True)
@@ -287,9 +329,10 @@ def trainer(cfg: DictConfig):
                     # else:
                     #     accelerator.backward(load_balancing_loss)
 
-                    accelerator.backward(train_loss)
-                    #print(cost_based_loss_alpha)
 
+
+                    accelerator.backward(train_loss)
+                    #accelerator.backward(mlm_loss)
 
                     # Log metrics
                     metrics["train/local_samples"] += batch["input_ids"].shape[0]
@@ -314,6 +357,12 @@ def trainer(cfg: DictConfig):
 
             else:
                 # Forward pass
+                if cfg.model.type == 'neobert_original':
+                        model_output = model(batch["input_ids"], batch.get("attention_mask", None))
+                        logits = model_output['logits']
+                        train_loss_fn = torch.nn.CrossEntropyLoss()
+                        train_loss = train_loss_fn(logits.view(-1, cfg.tokenizer.vocab_size), batch["labels"].view(-1))
+                        mlm_loss = train_loss
                 if cfg.model.type == "homo_moe":
                     model_output = model(batch["input_ids"], batch.get("attention_mask", None), output_expert_usage_loss=False, output_router_logits=True)
                     train_loss, mlm_loss, load_balancing_loss = homo_moe_loss_fn(model_output['logits'], model_output['router_logits'], cfg, batch)
@@ -324,56 +373,59 @@ def trainer(cfg: DictConfig):
                     num_masked_tokens = cfg.dataloader.train.batch_size * cfg.tokenizer.max_length * metrics["train/steps"]*cfg.datacollator.mlm_probability
                     model_output = model(batch["input_ids"], batch.get("attention_mask", None), output_expert_usage_loss=True, output_router_logits=True)
                     train_loss,mlm_loss,expert_loss,cost_based_loss_alpha = mop_loss_fn(model_output['logits'], model_output['expert_usage_loss'], cfg, batch, num_masked_tokens) 
+
+                    #run the analyses
+                analysistraining(batch,model_output,metrics["train/steps"],metrics)
                     
                     #ANALYSING CORRELATION BETWEEN EXPERT USAGE AND LOSS AND MSE LOSS PER SEQUENCE
 
                     #compute variance of expert loss between sequences within a batch and  across batches
 
-                    normalised_expert_usage_cost_per_seq = get_normalised_expert_usage_cost_per_sequence(model_output['router_logits'], batch.get("attention_mask", None), cfg)
-                    var_across_sequences = torch.var(normalised_expert_usage_cost_per_seq)
-                    metrics["train/var_across_sequences"] = var_across_sequences.item()
-                    mean_normalised_expert_usage_cost_per_batch = normalised_expert_usage_cost_per_seq.mean()
+                    # # normalised_expert_usage_cost_per_seq = get_normalised_expert_usage_cost_per_sequence(model_output['router_logits'], batch.get("attention_mask", None), cfg)
+                    # # var_across_sequences = torch.var(normalised_expert_usage_cost_per_seq)
+                    # # metrics["train/var_across_sequences"] = var_across_sequences.item()
+                    # # mean_normalised_expert_usage_cost_per_batch = normalised_expert_usage_cost_per_seq.mean()
 
-                    # Update moving buffer and compute moving variance
-                    moving_mean_buffer.append(mean_normalised_expert_usage_cost_per_batch.item())
-                    if len(moving_mean_buffer) > 10:
-                        moving_mean_buffer.pop(0)
-                    if len(moving_mean_buffer) > 1:
-                        moving_var = torch.tensor(moving_mean_buffer).var(unbiased=False).item()
-                    else:
-                        moving_var = 0.0
-                    metrics["train/moving_var_mean_normalised_expert_usage_cost_per_batch"] = moving_var
+                    # # Update moving buffer and compute moving variance
+                    # moving_mean_buffer.append(mean_normalised_expert_usage_cost_per_batch.item())
+                    # if len(moving_mean_buffer) > 10:
+                    #     moving_mean_buffer.pop(0)
+                    # if len(moving_mean_buffer) > 1:
+                    #     moving_var = torch.tensor(moving_mean_buffer).var(unbiased=False).item()
+                    # else:
+                    #     moving_var = 0.0
+                    # metrics["train/moving_var_mean_normalised_expert_usage_cost_per_batch"] = moving_var
 
-                    #compute total entropy
-                    entropy = get_entropy(model_output['router_logits'], cfg, batch.get("attention_mask", None))
-                    metrics["train/entropy"] = entropy.item()
+                    # #compute total entropy
+                    # entropy = get_entropy(model_output['router_logits'], cfg, batch.get("attention_mask", None))
+                    # metrics["train/entropy"] = entropy.item()
 
                     #per say correlation computation
                     # Extract per-sequence metrics
                     
-                    normalised_expert_usage_cost_per_seq = get_normalised_expert_usage_cost_per_sequence(model_output['router_logits'], batch.get("attention_mask", None), cfg)
-                    mse_loss_per_seq = get_mse_per_sequence(model_output['logits'], cfg,batch)
+                    # normalised_expert_usage_cost_per_seq = get_normalised_expert_usage_cost_per_sequence(model_output['router_logits'], batch.get("attention_mask", None), cfg)
+                    # mse_loss_per_seq = get_mse_per_sequence(model_output['logits'], cfg,batch)
 
-                    # Accumulate in buffers
-                    expert_usage_buffer.extend(normalised_expert_usage_cost_per_seq.detach().cpu().tolist())
-                    mse_loss_buffer.extend(mse_loss_per_seq.detach().cpu().tolist())
+                    # # Accumulate in buffers
+                    # expert_usage_buffer.extend(normalised_expert_usage_cost_per_seq.detach().cpu().tolist())
+                    # mse_loss_buffer.extend(mse_loss_per_seq.detach().cpu().tolist())
 
-                    # When buffer is full, compute correlation and log, then reset
-                    if len(expert_usage_buffer) >= buffer_size and len(mse_loss_buffer) >= buffer_size:
-                        # Truncate to buffer_size in case of overflow
-                        expert_usage_arr = torch.tensor(expert_usage_buffer[:buffer_size])
-                        mse_loss_arr = torch.tensor(mse_loss_buffer[:buffer_size])
-                        # Compute Pearson correlation
-                        if expert_usage_arr.std() > 0 and mse_loss_arr.std() > 0:
-                            correlation = torch.corrcoef(torch.stack([expert_usage_arr, mse_loss_arr]))[0, 1].item()
-                        else:
-                            correlation = 0.0
-                        metrics["train/expert_usage_mse_corr"] = correlation
-                        # Log correlation
-                        accelerator.log({"train/expert_usage_mse_corr": correlation})
-                        # Reset buffers
-                        expert_usage_buffer = []
-                        mse_loss_buffer = []
+                    # # When buffer is full, compute correlation and log, then reset
+                    # if len(expert_usage_buffer) >= buffer_size and len(mse_loss_buffer) >= buffer_size:
+                    #     # Truncate to buffer_size in case of overflow
+                    #     expert_usage_arr = torch.tensor(expert_usage_buffer[:buffer_size])
+                    #     mse_loss_arr = torch.tensor(mse_loss_buffer[:buffer_size])
+                    #     # Compute Pearson correlation
+                    #     if expert_usage_arr.std() > 0 and mse_loss_arr.std() > 0:
+                    #         correlation = torch.corrcoef(torch.stack([expert_usage_arr, mse_loss_arr]))[0, 1].item()
+                    #     else:
+                    #         correlation = 0.0
+                    #     metrics["train/expert_usage_mse_corr"] = correlation
+                    #     # Log correlation
+                    #     accelerator.log({"train/expert_usage_mse_corr": correlation})
+                    #     # Reset buffers
+                    #     expert_usage_buffer = []
+                    #     mse_loss_buffer = []
                     
 
 
@@ -449,11 +501,14 @@ def trainer(cfg: DictConfig):
                         expert_grad_norm = 0.0
                         embedding_grad_norm = 0.0
                         attention_grad_norm = 0.0
+                        decoder_grad_norm = 0.0
 
                         num_gate_params = 0.0
                         num_expert_params = 0.0
                         num_embedding_params = 0.0
                         num_attention_params = 0.0
+                        num_decoder_params = 0.0
+                        
 
 
 
@@ -468,26 +523,34 @@ def trainer(cfg: DictConfig):
                                     expert_grad_norm += param.grad.norm(2).item() ** 2
                                     num_expert_params += param.numel()
                                     # print(num_expert_params)
-                                if "model.encoder" in name or "decoder" in name or "model.positional_embedding" in name:
+                                #if "model.encoder" in name or "decoder" in name or "model.positional_embedding" in name:
+                                if "model.encoder" in name or "model.positional_embedding" in name:    
                                     embedding_grad_norm += param.grad.norm(2).item() ** 2
                                     num_embedding_params += param.numel()
+                                #if "model.encoder" in name or "decoder" in name or "model.positional_embedding" in name:
+                                if "decoder" in name:
+                                    decoder_grad_norm += param.grad.norm(2).item() ** 2
+                                    num_decoder_params += param.numel()
                                 if "qkv" in name or "wo" in name:
                                     attention_grad_norm  += param.grad.norm(2).item() ** 2
                                     num_attention_params += param.numel()
 
                         
 
-                        total_num_params = num_gate_params + num_expert_params + num_embedding_params + num_attention_params
-                        total_grads = (gate_grad_norm + expert_grad_norm + embedding_grad_norm + attention_grad_norm) ** 0.5
-                        metrics["train/rel_prop_gate_grad_norm"] = (gate_grad_norm ** 0.5)/total_grads * (total_num_params / num_gate_params)
-                        metrics["train/rel_prop_expert_grad_norm"] = (expert_grad_norm ** 0.5)/total_grads * (total_num_params / num_expert_params)
-                        metrics["train/rel_prop_embedding_grad_norm"] = (embedding_grad_norm ** 0.5)/total_grads * (total_num_params / num_embedding_params)
-                        metrics["train/rel_prop_attention_grad_norm"] = (attention_grad_norm ** 0.5)/total_grads * (total_num_params / num_attention_params)
+                        total_num_params = num_gate_params + num_expert_params + num_embedding_params + num_attention_params+ num_decoder_params
+                        total_grads = (gate_grad_norm + expert_grad_norm + embedding_grad_norm + attention_grad_norm + decoder_grad_norm) ** 0.5
+                        metrics["train/rel_prop_gate_grad_norm"] = (gate_grad_norm ** 0.5)/total_grads * (total_num_params / num_gate_params)if num_gate_params !=0 else 0
+                        metrics["train/rel_prop_expert_grad_norm"] = (expert_grad_norm ** 0.5)/total_grads * (total_num_params / num_expert_params)if num_expert_params !=0 else 0
+                        metrics["train/rel_prop_embedding_grad_norm"] = (embedding_grad_norm ** 0.5)/total_grads * (total_num_params / num_embedding_params)if num_embedding_params !=0 else 0
+                        metrics["train/rel_prop_attention_grad_norm"] = (attention_grad_norm ** 0.5)/total_grads * (total_num_params / num_attention_params)if num_attention_params !=0 else 0
+                        metrics["train/abs_embedding_grad_norm"] = (embedding_grad_norm ** 0.5)
+                        metrics["train/abs_attention_grad_norm"] = (attention_grad_norm ** 0.5)
+                        metrics["train/abs_decoder_grad_norm"] = (decoder_grad_norm ** 0.5)
 
-                        metrics["train/prop_gate_grad_norm"] = (gate_grad_norm ** 0.5)/total_grads
-                        metrics["train/prop_expert_grad_norm"] = (expert_grad_norm ** 0.5)/total_grads 
-                        metrics["train/prop_embedding_grad_norm"] = (embedding_grad_norm ** 0.5)/total_grads 
-                        metrics["train/prop_attention_grad_norm"] = (attention_grad_norm ** 0.5)/total_grads 
+                        metrics["train/prop_decoder_grad_norm"] = (decoder_grad_norm ** 0.5)/total_grads
+                        metrics["train/prop_expert_grad_norm"] = (expert_grad_norm ** 0.5)/total_grads
+                        metrics["train/prop_embedding_grad_norm"] = (embedding_grad_norm ** 0.5)/total_grads
+                        metrics["train/prop_attention_grad_norm"] = (attention_grad_norm ** 0.5)/total_grads
 
                         #special metrics when we specifically look at both loss gradients.
 
@@ -551,4 +614,5 @@ def trainer(cfg: DictConfig):
 
     # Make sure that the wandb tracker finishes correctly and close the progress bar
     pbar.close()
+    accelerator.end_training()
     accelerator.end_training()
