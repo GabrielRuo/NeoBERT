@@ -9,6 +9,9 @@ defaults:
 
 seed: 0
 
+val_batches_per_eval:  50
+val_interval: 30
+
 saved_model:
   base_path: /runs/logs/checkpoints/mop_2025-08-15_16-07-06/
   checkpoint: mop_100
@@ -21,7 +24,7 @@ wandb:
   resume: never
   name: null
   project: MoP
-  entity: g-ruault-centralesup-lec
+  entity: gabriel-ruault-centralesup-lec
   tags: []
   dir: logs/wandb
   mode: online
