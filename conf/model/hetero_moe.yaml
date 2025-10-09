@@ -4,6 +4,7 @@ routing_strategy: 'top_p'
 #num_experts_per_tok :2 if routing_strategy is top_k
 min_expert_cumprob_per_token: 0.4 #based on https://arxiv.org/pdf/2403.07652
 expert_sizes: '432, 528, 624, 720, 816, 912, 1008, 1104'
+expert_cost_exponent: 2
 apply_expert_dropout: False
 loss:
   penalty_loss_coeff: 0.1

@@ -1,3 +1,4 @@
+type: neobert_original  
 rope: True
 rms_norm: True
 hidden_act: swiglu
