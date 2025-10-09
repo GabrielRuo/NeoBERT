@@ -1,0 +1,15 @@
+method: grid
+parameters:
+  model.expert_cost_exponent: 
+    value: 2
+  model.loss.cost_based_loss_alpha_start: 
+    value: !!float 5e-10
+  model.loss.cost_based_loss_alpha_end: 
+    values: [!!float 1e-4, !!float 5e-6]
+  model.loss.cost_based_loss_schedule_tokens: 
+    value: 100
+  model.loss.denominator_exponent: 
+    value: 1
+  model.loss.alpha_scaling: 
+    value: 0.0
+
