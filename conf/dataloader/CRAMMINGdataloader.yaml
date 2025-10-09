@@ -4,3 +4,9 @@ train:
   shuffle: True
   pin_memory: True
   persistent_workers: False
+test:
+  num_workers: 4
+  batch_size: 32
+  shuffle: False
+  pin_memory: True
+  persistent_workers: False
