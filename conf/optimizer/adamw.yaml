@@ -4,3 +4,4 @@ hparams:
   betas: [0.9, 0.95]
   eps: 1e-8
   weight_decay: 0.01
+  
