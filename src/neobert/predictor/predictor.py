@@ -1,6 +1,7 @@
 #from pyexpat import model
 
 #from NeoBERT.NeoBERT_dev.src.neobert.pretraining import metrics
+from datetime import datetime
 from ..tokenizer import get_tokenizer
 from transformers import BertModel, BatchEncoding
 import torch
@@ -22,6 +23,10 @@ from peft import LoraConfig, get_peft_model, TaskType
 from ..dataset import get_dataset
 from omegaconf import OmegaConf, DictConfig
 import os
+import datetime
+import matplotlib.pyplot as plt
+import numpy as np
+from io import BytesIO
 
 
 #def config
@@ -100,8 +105,9 @@ class BERTPredictor(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.bert = BertModel.from_pretrained("bert-base-uncased")
-        for param in self.bert.parameters():
-            param.requires_grad = False
+        # #freeze bert params for LoRA
+        # for param in self.bert.parameters():
+        #     param.requires_grad = False
         #pretrained bert params
         hidden_size = self.bert.config.hidden_size
         #neobert layer params
@@ -122,7 +128,8 @@ class BERTPredictor(nn.Module):
         return logits
     
 
-def get_expert_mask(gate_logits,cfg):
+def get_expert_mask(gate_logits,routing_strategy,num_experts_per_tok_inference=2,min_expert_cumprob_per_token=0.4):
+
     if isinstance(gate_logits, tuple):
         compute_device = gate_logits[0].device
         stacked_gate_logits = torch.stack([layer_gate.to(compute_device) for layer_gate in gate_logits], dim=0)#n_layers, batch_size*seq_length, n_experts
@@ -130,13 +137,13 @@ def get_expert_mask(gate_logits,cfg):
     routing_weights = torch.nn.functional.softmax(stacked_gate_logits, dim=-1)
 
 
-    if cfg.model.routing_strategy == "top_k":
-        top_k = cfg.model.num_experts_per_tok_inference #if we wanted  to use top_k for heterogeneous moe
+    if routing_strategy == "top_k":
+        top_k = num_experts_per_tok_inference #if we wanted  to use top_k for heterogeneous moe
         _, selected_experts = torch.topk(routing_weights, top_k, dim=-1)
         target_expert_mask = torch.nn.functional.one_hot(selected_experts, num_experts).sum(2)#n_layers, batch_size*seq_length, n_experts
     
-    elif cfg.model.routing_strategy == "top_p":
-        top_p = cfg.model.min_expert_cumprob_per_token
+    elif routing_strategy == "top_p":
+        top_p = min_expert_cumprob_per_token
         sorted_weights, sorted_indices = torch.sort(routing_weights, dim=-1, descending=False)
 
         cum_probs = sorted_weights.cumsum(dim=-1)
@@ -146,6 +153,33 @@ def get_expert_mask(gate_logits,cfg):
         target_expert_mask = unsorted_mask.scatter(dim=-1, index=sorted_indices, src=mask) #n_layers, batch_size*seq_length, n_experts
 
     return target_expert_mask # n_layers, batch_size*n_seq, n_experts
+
+
+# def get_expert_mask(gate_logits,routing_strategy,num_experts_per_tok_inference=2,min_expert_cumprob_per_token):
+
+#     if isinstance(gate_logits, tuple):
+#         compute_device = gate_logits[0].device
+#         stacked_gate_logits = torch.stack([layer_gate.to(compute_device) for layer_gate in gate_logits], dim=0)#n_layers, batch_size*seq_length, n_experts
+#         _,_, num_experts = stacked_gate_logits.shape
+#     routing_weights = torch.nn.functional.softmax(stacked_gate_logits, dim=-1)
+
+
+#     if cfg.model.routing_strategy == "top_k":
+#         top_k = cfg.model.num_experts_per_tok_inference #if we wanted  to use top_k for heterogeneous moe
+#         _, selected_experts = torch.topk(routing_weights, top_k, dim=-1)
+#         target_expert_mask = torch.nn.functional.one_hot(selected_experts, num_experts).sum(2)#n_layers, batch_size*seq_length, n_experts
+    
+#     elif cfg.model.routing_strategy == "top_p":
+#         top_p = cfg.model.min_expert_cumprob_per_token
+#         sorted_weights, sorted_indices = torch.sort(routing_weights, dim=-1, descending=False)
+
+#         cum_probs = sorted_weights.cumsum(dim=-1)
+#         mask = cum_probs > 1 - top_p
+
+#         unsorted_mask = torch.zeros_like(mask, dtype=torch.bool)
+#         target_expert_mask = unsorted_mask.scatter(dim=-1, index=sorted_indices, src=mask) #n_layers, batch_size*seq_length, n_experts
+
+#     return target_expert_mask # n_layers, batch_size*n_seq, n_experts
 
 
 def predictor(cfg_predictor):
@@ -188,7 +222,17 @@ def predictor(cfg_predictor):
         },
     )
 
-    set_seed(cfg_predictor.seed)
+    # set_seed(cfg_predictor.seed)
+    # set_seed(5)
+    # set_seed(6)
+    set_seed(25)
+    g = torch.Generator()
+    g.manual_seed(25)
+
+    def seed_worker(worker_id):
+        worker_seed = torch.initial_seed() % 2**32
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
 
     # Enable TF32 on matmul and on cuDNN
     torch.backends.cuda.matmul.allow_tf32 = cfg_predictor.trainer.tf32
@@ -216,6 +260,12 @@ def predictor(cfg_predictor):
     #load  pretrained config
     cfg_path = os.path.join(cfg_predictor.saved_model.base_path,"config.yaml")
     cfg = OmegaConf.load(cfg_path)
+
+    base_name = cfg.model.type + "_predictor"
+    if cfg.model.type =="mop":
+        base_name = base_name + "_" + str(cfg.model.loss.cost_based_loss_alpha_end)
+    time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    wandb.run.name = base_name + "_" + time_str
 
     # get pretrained BERT predictor
     BERTpredictor = BERTPredictor(cfg)
@@ -250,8 +300,15 @@ def predictor(cfg_predictor):
             **cfg_predictor.dataset.test)
 
     #build dataloaders
-    train_dataloader = get_dataloader(train_dataset, tokenizer, dtype=dtype_pad_mask, **cfg_predictor.dataloader.train, **cfg_predictor.datacollator)
-    test_dataloader = get_dataloader(test_dataset, tokenizer, dtype=dtype_pad_mask, **cfg_predictor.dataloader.test, **cfg_predictor.datacollator)
+    train_dataloader = get_dataloader(
+        train_dataset, tokenizer, dtype=dtype_pad_mask,
+        **cfg_predictor.dataloader.train,  # <-- check this dict for 'shuffle': True
+        **cfg_predictor.datacollator,
+    )
+    test_dataloader = get_dataloader(
+        test_dataset, tokenizer, dtype=dtype_pad_mask,
+        **cfg_predictor.dataloader.test, **cfg_predictor.datacollator
+    )
 
     # define loss function
     loss_fn = nn.BCEWithLogitsLoss()
@@ -259,25 +316,48 @@ def predictor(cfg_predictor):
     #define optimizer
 
      # Optimizer and Scheduler
-    optimizer = get_optimizer(BERTpredictor, accelerator.distributed_type, name=cfg_predictor.optimizer.name, **cfg_predictor.optimizer.hparams)
+
+#     optimizer = torch.optim.SGD([
+#     {"params": BERTpredictor.bert.parameters(), "lr": 2e-5},
+#     {"params": BERTpredictor.router_head.parameters(), "lr": 1e-3},
+# ], weight_decay=0.01)
+    
+#     optimizer = torch.optim.AdamW([
+#     {"params": BERTpredictor.bert.parameters(), "lr": 2e-5, "betas": [0.01, 0.999], "eps": 1e-8},
+#     {"params": BERTpredictor.router_head.parameters(), "lr": 1e-3,"betas": [0.01, 0.999], "eps": 1e-8},
+# ], weight_decay=0.01)
+    
+
+
+    optimizer = torch.optim.AdamW([
+    {"params": BERTpredictor.bert.parameters(), "lr": 2e-5, "betas": [0.9, 0.95], "eps": 1e-8},
+    {"params": BERTpredictor.router_head.parameters(), "lr": 1e-3,"betas": [0.9, 0.95], "eps": 1e-8},
+], weight_decay=0.01)
+
+#     optimizer = torch.optim.AdamW([
+#     {"params": BERTpredictor.bert.parameters(), "lr": 2e-5, "betas": [0.9, 0.95], "eps": 1e-8},
+#     {"params": BERTpredictor.router_head.parameters(), "lr": 1e-5,"betas": [0.9, 0.95], "eps": 1e-8},
+# ], weight_decay=0.01)
+
+    # optimizer = get_optimizer(BERTpredictor, accelerator.distributed_type, name=cfg_predictor.optimizer.name, **cfg_predictor.optimizer.hparams)
     scheduler = get_scheduler(optimizer=optimizer, lr=cfg_predictor.optimizer.hparams.lr, **cfg_predictor.scheduler)
     #SANS DOUTE FAUT-IL UN SCHEDULER DIFFERENT ICI
 
 
-    lora_config = LoraConfig(
-        r=8,
-        lora_alpha=32,
-        target_modules=["query", "value"],
-        lora_dropout=0.05,
-        bias="none",
-        task_type=TaskType.FEATURE_EXTRACTION,  # <— avoids labels
-    )
+    # lora_config = LoraConfig(
+    #     r=8,
+    #     lora_alpha=32,
+    #     target_modules=["query", "value"],
+    #     lora_dropout=0.05,
+    #     bias="none",
+    #     task_type=TaskType.FEATURE_EXTRACTION,  # <— avoids labels
+    # )
 
     # 2. Wrap your predictor model with LoRA
-    BERTpredictor.bert = get_peft_model(BERTpredictor.bert, lora_config)
+    # BERTpredictor.bert = get_peft_model(BERTpredictor.bert, lora_config)
 
     # Prepare with accelerate
-    train_dataloader,test_dataloader, BERTpredictor,neobert_model, optimizer, scheduler = accelerator.prepare(
+    train_dataloader, test_dataloader, BERTpredictor, neobert_model, optimizer, scheduler = accelerator.prepare(
         train_dataloader,
         test_dataloader,
         BERTpredictor,
@@ -308,10 +388,9 @@ def predictor(cfg_predictor):
 
     #finetuning on layer prediction
 
-    val_batches_per_eval = 50
-    val_interval = 30
+    metrics = {}
 
-    compiled_BERTpredictor = torch.compile(BERTpredictor)
+    # compiled_BERTpredictor = torch.compile(BERTpredictor)
     while cfg_predictor.trainer.max_steps > step:
         stored_batch = {
             "input_ids": None,
@@ -333,9 +412,10 @@ def predictor(cfg_predictor):
             neobert_model_output = neobert_model(batch["input_ids"], batch.get("attention_mask", None), output_expert_usage_loss=False, output_router_logits=True)
             target_gate_logits = neobert_model_output['router_logits'] #tuple  of n_layers of batch_size*seq_length,  n_experts
 
-            target_expert_mask = get_expert_mask(target_gate_logits, cfg) # n_layers, batch_size*n_seq, n_experts
+            target_expert_mask = get_expert_mask(target_gate_logits, routing_strategy="top_k") # n_layers, batch_size*n_seq, n_experts
 
-            predicted_routed_logits = compiled_BERTpredictor(input_ids=batch["input_ids"])
+            # predicted_routed_logits = compiled_BERTpredictor(input_ids=batch["input_ids"])
+            predicted_routed_logits = BERTpredictor(input_ids=batch["input_ids"])
             predicted_routed_logits = torch.stack(predicted_routed_logits, dim=0) #n_layers, batch_size*seq_length, n_experts
 
             #ignore padded tokens
@@ -361,8 +441,32 @@ def predictor(cfg_predictor):
             loss = loss_fn(predicted_routed_logits, target_expert_mask*1.0)
             accelerator.backward(loss)
 
+            if step % cfg_predictor.wandb.log_interval == 0:
+                metrics['train/loss'] = loss.item()
+                # accelerator.log({"train/loss": loss.item(), "step": step})
+                # Compute and log gradient norms for router and backbone separately
+                router_grad_norm = 0.0
+                backbone_grad_norm = 0.0
+                num_router_params = 0
+                num_backbone_params = 0
+                for name, param in BERTpredictor.named_parameters():
+                            if param.grad is not None:
+                                if "router_head" in name:
+                                    router_grad_norm += param.grad.norm(2).item() ** 2
+                                    num_router_params += param.numel()
+                                else:
+                                    backbone_grad_norm += param.grad.norm(2).item() ** 2
+                                    num_backbone_params += param.numel()
+                metrics['train/router_grad_norm'] = (router_grad_norm ** 0.5)
+                metrics['train/backbone_grad_norm'] = (backbone_grad_norm ** 0.5) 
+                metrics["train/rel_backbone_grad_norm"] = (backbone_grad_norm ** 0.5) / num_backbone_params if num_backbone_params > 0 else 0.0
+                metrics["train/rel_router_grad_norm"] = (router_grad_norm ** 0.5) / num_router_params if num_router_params > 0 else 0.0
+            
+            
+
             if cfg_predictor.trainer.gradient_clipping is not None and cfg_predictor.trainer.gradient_clipping > 0:
-                accelerator.clip_grad_norm_(compiled_BERTpredictor.parameters(), cfg_predictor.trainer.gradient_clipping)
+                # accelerator.clip_grad_norm_(compiled_BERTpredictor.parameters(), cfg_predictor.trainer.gradient_clipping)
+                accelerator.clip_grad_norm_(BERTpredictor.parameters(), cfg_predictor.trainer.gradient_clipping)
 
             # Update model parameters
             optimizer.step()
@@ -372,13 +476,15 @@ def predictor(cfg_predictor):
             step += 1
             pbar.update(1)
     
-            if step % cfg_predictor.wandb.log_interval == 0:
-                accelerator.log({"train/loss": loss.item(), "step": step})
+            
+                
             if step >= cfg_predictor.trainer.max_steps:
                     break
             # Add validation/testing every val_interval steps
-            if step % val_interval == 0:
-                run_test_batches(BERTpredictor, neobert_model, test_dataloader, accelerator, cfg, max_batches=val_batches_per_eval)
+            if step % cfg_predictor.val_interval == 0:
+                run_test_batches(BERTpredictor, neobert_model, test_dataloader, accelerator, cfg,cfg_predictor, metrics, max_batches=cfg_predictor.val_batches_per_eval)
+            accelerator.log(metrics)
+
     pbar.close()
   
 #testing
@@ -388,6 +494,7 @@ def predictor(cfg_predictor):
             test_dataloader,
             desc="Eval",
             unit="batch",
+            initial = 0,
             disable=(cfg_predictor.trainer.disable_tqdm or not accelerator.is_main_process),
         )
         stored_batch = {
@@ -411,11 +518,11 @@ def predictor(cfg_predictor):
             #target
             model_output = neobert_model(batch["input_ids"], batch.get("attention_mask", None), output_expert_usage_loss=False, output_router_logits=True)
             target_gate_logits = model_output['router_logits'] #tuple  of n_layers of batch_size*seq_length,  n_experts
-            target_expert_mask = get_expert_mask(target_gate_logits, cfg) # n_layers, batch_size*n_seq, n_experts
+            target_expert_mask = get_expert_mask(target_gate_logits, routing_strategy="top_k") # n_layers, batch_size*n_seq, n_experts
 
             #prediction
             predicted_routed_logits = BERTpredictor(batch["input_ids"]) 
-            predicted_expert_mask = get_expert_mask(predicted_routed_logits, cfg)#n_layers, batch_size*seq_length, n_experts
+            predicted_expert_mask = get_expert_mask(predicted_routed_logits, routing_strategy="top_k")#n_layers, batch_size*seq_length, n_experts
 
             #ignore padded tokens
             pad_mask = batch.get("attention_mask", None)
@@ -436,19 +543,20 @@ def predictor(cfg_predictor):
             total_acc.append(mean_accuracy)
             accelerator.log({"final_test/accuracy": mean_accuracy.item()})
             pbar_test.update(1)
-        mean_accuracy = torch.stack(total_acc).mean()
-        accelerator.log({"final_test/mean_accuracy": mean_accuracy.item()})
+        mean_accuracy_total = torch.stack(total_acc).mean()
+        accelerator.log({"final_test/mean_accuracy": mean_accuracy_total.item()})
 
     accelerator.end_training()
 
-def run_test_batches(BERTpredictor, neobert_model, test_dataloader, accelerator, cfg, max_batches=None):
+def run_test_batches(BERTpredictor, neobert_model, test_dataloader, accelerator, cfg,cfg_predictor, metrics_dict, max_batches=None):
     BERTpredictor.eval()
     with torch.no_grad():
         pbar_test = tqdm(
             test_dataloader,
             desc="Eval",
+            initial = 0,
             unit="batch",
-            disable=(cfg.trainer.disable_tqdm or not accelerator.is_main_process),
+            disable=(cfg_predictor.trainer.disable_tqdm or not accelerator.is_main_process),
         )
         stored_batch = {
             "input_ids": None,
@@ -456,25 +564,28 @@ def run_test_batches(BERTpredictor, neobert_model, test_dataloader, accelerator,
             "labels": None,
         }
         total_acc = []
+        printed_tokens = 0  # Track how many tokens we've printed
+        max_print_tokens = 1
+        proportions = []  # Store per-token accuracy proportions
         for i, batch in enumerate(test_dataloader):
             if max_batches is not None and i >= max_batches:
                 break
 
-            if batch["input_ids"].shape[0] != cfg.dataloader.train.batch_size:
-                batch, stored_batch = to_target_batch_size(batch, stored_batch, cfg.dataloader.train.batch_size)
+            if batch["input_ids"].shape[0] != cfg_predictor.dataloader.train.batch_size:
+                batch, stored_batch = to_target_batch_size(batch, stored_batch, cfg_predictor.dataloader.train.batch_size)
 
-            if batch["input_ids"].shape[0] < cfg.dataloader.train.batch_size:
+            if batch["input_ids"].shape[0] < cfg_predictor.dataloader.train.batch_size:
                 stored_batch = batch
                 continue
 
             #target
             model_output = neobert_model(batch["input_ids"], batch.get("attention_mask", None), output_expert_usage_loss=False, output_router_logits=True)
             target_gate_logits = model_output['router_logits'] 
-            target_expert_mask = get_expert_mask(target_gate_logits, cfg)
+            target_expert_mask = get_expert_mask(target_gate_logits, routing_strategy="top_k")
 
             #prediction
-            predicted_routed_logits = BERTpredictor(batch["input_ids"])# should we  add the attention mask and make it a normal one not additive?
-            predicted_expert_mask = get_expert_mask(predicted_routed_logits, cfg)
+            predicted_routed_logits = BERTpredictor(batch["input_ids"])# should we add the attention mask and make it a normal one not additive?
+            predicted_expert_mask = get_expert_mask(predicted_routed_logits, routing_strategy="top_k")
 
             #ignore padded tokens
             pad_mask = batch.get("attention_mask", None)
@@ -484,19 +595,202 @@ def run_test_batches(BERTpredictor, neobert_model, test_dataloader, accelerator,
                 predicted_expert_mask = predicted_expert_mask[:,pad_mask,:]
                 target_expert_mask = target_expert_mask[:,pad_mask,:]
 
-            #reshape
-            target_expert_mask = target_expert_mask.view(-1, target_expert_mask.size(-1))
-            predicted_expert_mask = predicted_expert_mask.view(-1, predicted_expert_mask.size(-1))
+            #visualisation:
+
+            
+
+
+            def _visualise_token_path(target_gate_logits, predicted_gate_logits, token_index, token_str, visualisations_list):
+                # Stack logits if tuple
+                if isinstance(target_gate_logits, tuple):
+                    compute_device = target_gate_logits[0].device
+                    target_stacked_gate_logits = torch.stack([layer_gate.to(compute_device) for layer_gate in target_gate_logits], dim=0)  # n_layers, batch_size*seq_length, n_experts
+                else:
+                    target_stacked_gate_logits = target_gate_logits
+                target_routing_weights = torch.nn.functional.softmax(target_stacked_gate_logits, dim=-1)  # n_layers, batch_size*seq_length, n_experts
+
+                if isinstance(predicted_gate_logits, tuple):
+                    compute_device = predicted_gate_logits[0].device
+                    predicted_stacked_gate_logits = torch.stack([layer_gate.to(compute_device) for layer_gate in predicted_gate_logits], dim=0)
+                else:
+                    predicted_stacked_gate_logits = predicted_gate_logits
+                predicted_routing_weights = torch.nn.functional.softmax(predicted_stacked_gate_logits, dim=-1)
+
+                # Select the routing weights for the given token index
+                # Shape: (n_layers, n_experts)
+                target_weights_token = target_routing_weights[:, token_index, :].detach().cpu().numpy()
+                predicted_weights_token = predicted_routing_weights[:, token_index, :].detach().cpu().numpy()
+
+                n_layers, n_experts = target_weights_token.shape
+
+                # Compute top-2 experts for each layer for target and prediction
+                target_top2 = np.argsort(target_weights_token, axis=1)[:, -2:]  # shape (n_layers, 2)
+                pred_top2 = np.argsort(predicted_weights_token, axis=1)[:, -2:]  # shape (n_layers, 2)
+
+                # Plot side-by-side heatmaps
+                fig, axes = plt.subplots(1, 2, figsize=(10, 6))
+                im0 = axes[0].imshow(target_weights_token, aspect='auto', cmap='viridis')
+                axes[0].set_title('Target Routing Weights')
+                axes[0].set_xlabel('Expert')
+                axes[0].set_ylabel('Layer')
+                fig.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
+
+                # Add black circles for target top-2 experts and red crosses for predicted top-2 experts
+                for layer in range(n_layers):
+                    # Black circles for target
+                    for expert in target_top2[layer]:
+                        axes[0].scatter(expert, layer, s=80, facecolors='none', edgecolors='black', linewidths=2, marker='o', zorder=3)
+                    # Red crosses for prediction
+                    for expert in pred_top2[layer]:
+                        axes[0].scatter(expert, layer, s=80, color='red', marker='x', linewidths=2, zorder=4)
+
+                im1 = axes[1].imshow(predicted_weights_token, aspect='auto', cmap='viridis')
+                axes[1].set_title('Predicted Routing Weights')
+                axes[1].set_xlabel('Expert')
+                axes[1].set_ylabel('Layer')
+                fig.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+
+                fig.suptitle(f"Token index: {token_index} ('{token_str}')")
+                plt.tight_layout(rect=[0, 0.08, 1, 0.95])
+
+                # Add a small legend at the bottom of the figure
+                import matplotlib.lines as mlines
+                from matplotlib.legend import Legend
+
+                black_circle = mlines.Line2D([], [], color='black', marker='o', linestyle='None', markersize=8, label='Target top-2 expert')
+                red_cross = mlines.Line2D([], [], color='red', marker='x', linestyle='None', markersize=8, label='Predicted top-2 expert')
+                handles = [black_circle, red_cross]
+                fig.legend(handles=handles, loc='lower center', ncol=2, fontsize='small', frameon=False, bbox_to_anchor=(0.5, 0.01))
+
+                # Save to buffer and append to visualisations_list
+                figure_filename = f"token_path_for:{token_index}.png"
+                plt.savefig(figure_filename)
+                plt.close(fig)
+
+                visualisations_list.append(wandb.Image(figure_filename))
+                
+            tokenizer = get_tokenizer(**cfg.tokenizer)
+            if i == 0:  # Only do this for the first batch
+
+                visualisations_list = []
+                # For 10 different random tokens in batch*seq_length, pick a token index,
+                # extract the token _id from this,
+                # decode it to the original token through the tokenizer,
+                # and visualise the routing path.
+                
+                num_visualisations = 10
+                input_ids_flat = batch["input_ids"].view(-1)
+                seq_len = input_ids_flat.shape[0]
+                # Randomly sample up to 10 unique token indices
+                indices = np.random.choice(seq_len, min(num_visualisations, seq_len), replace=False)
+                for token_index in indices:
+                    token_id = input_ids_flat[token_index].item()
+                    try:
+                        token_str = tokenizer.decode([token_id])
+                    except Exception:
+                        token_str = str(token_id)
+                    _visualise_token_path(target_gate_logits, predicted_routed_logits, token_index, token_str, visualisations_list)
+                metrics_dict["test/visualisations"] = visualisations_list
+
+                
+
+            #reshape to compute accuracy
+            target_expert_mask = target_expert_mask.view(-1, target_expert_mask.size(-1))# n_layers*batch_size*seq_length, n_experts
+            predicted_expert_mask = predicted_expert_mask.view(-1, predicted_expert_mask.size(-1))# n_layers*batch_size*seq_length, n_experts
+
+            # print(target_expert_mask.shape, predicted_expert_mask.shape)
+            # print("target expert:", target_expert_mask[0:10,:])
+            # print("predicted expert:", predicted_expert_mask[0:10,:])
+
+        #     # Print routing trajectories for the first 10 tokens (across all batches)
+        #     if printed_tokens < max_print_tokens:
+        #         # For routing trajectory, we want the max expert index per layer for each token
+        #         # We need to go back to the unflattened shape: (n_layers, batch_size*seq_length, n_experts)
+        #         # So, get the original shapes before .view(-1, ...)
+        #         # Use the mask to get the indices of valid tokens
+        #         n_layers = predicted_expert_mask.shape[0] // (batch["input_ids"].shape[0] * batch["input_ids"].shape[1])
+        #         n_experts = predicted_expert_mask.shape[1]
+        #         # But easier: just use the original predicted_routed_logits and target_gate_logits before masking
+        #         # They are tuples of (batch_size*seq_length, n_experts) per layer
+        #         # We'll reconstruct the per-token routing for the first 10 valid tokens
+
+        #         # Get the original logits for both
+        #         # For each layer, get the max expert index for each token
+        #         # Only print for the first 10 valid tokens (after masking)
+        #         # We'll use the masked tensors for simplicity
+
+        #         # Get the number of valid tokens in this batch
+        #         num_valid_tokens = target_expert_mask.shape[0]
+        #         num_to_print = min(max_print_tokens - printed_tokens, num_valid_tokens)
+        #         if num_to_print > 0:
+        #             # Reshape to (n_layers, num_valid_tokens, n_experts)
+        #             n_layers = len(target_gate_logits)
+        #             # For masked tensors, shape is (n_layers, num_valid_tokens, n_experts)
+        #             # But after .view(-1, n_experts), so we need to reshape back
+        #             target_expert_mask_reshaped = target_expert_mask.view(n_layers, -1, n_experts)
+        #             predicted_expert_mask_reshaped = predicted_expert_mask.view(n_layers, -1, n_experts)
+        #             # For each token (up to num_to_print), print the routing trajectory
+        #             for t in range(num_to_print):
+        #                 # Get the token id and decode it
+        #                 # t is the index in the masked/flattened batch, so we need to map it back to batch/seq indices
+        #                 # Since pad_mask is flattened as (batch_size * seq_length), we can use the indices directly
+        #                 # Find the index in the original input_ids
+        #                 # Get the indices of valid tokens in the mask
+        #                 if pad_mask is not None:
+        #                     valid_indices = pad_mask.squeeze(-1).nonzero(as_tuple=True)[0]
+        #                     flat_idx = valid_indices[t].item()
+        #                     batch_size, seq_length = batch["input_ids"].shape
+        #                     batch_idx = flat_idx // seq_length
+        #                     seq_idx = flat_idx % seq_length
+        #                     token_id = batch["input_ids"][batch_idx, seq_idx].item()
+        #                 else:
+        #                     # If no mask, just use t directly
+        #                     batch_size, seq_length = batch["input_ids"].shape
+        #                     batch_idx = t // seq_length
+        #                     seq_idx = t % seq_length
+        #                     token_id = batch["input_ids"][batch_idx, seq_idx].item()
+        #                 # Decode token (tokenizer is not in scope, so print id as fallback)
+        #                 try:
+        #                     token_str = tokenizer.decode([token_id])
+        #                 except Exception:
+        #                     token_str = str(token_id)
+        #                 print(f"\nToken {printed_tokens + t} (id={token_id}, str='{token_str}'):");
+        #                 effective_route = []
+        #                 predicted_route = []
+        #                 for l in range(n_layers):
+        #                     eff_expert = torch.argmax(target_expert_mask_reshaped[l, t].int()).item()
+        #                     pred_expert = torch.argmax(predicted_expert_mask_reshaped[l, t].int()).item()
+        #                     effective_route.append(eff_expert)
+        #                     predicted_route.append(pred_expert)
+        #                 num_layers = len(effective_route)
+        #                 num_correct = sum([eff_expert == pred_expert for eff_expert, pred_expert in zip(effective_route, predicted_route)])
+        #                 accuracy = num_correct / num_layers if num_layers > 0 else 0.0
+        #                 proportions.append(accuracy)
+        #                 print("  Effective routing trajectory (target):", effective_route)
+        #                 print("  Predicted routing trajectory (BERTpredictor):", predicted_route)
+        #                 print(f"  Proportion of accurate predictions: {accuracy:.2f}")
+        #             printed_tokens += num_to_print
+        # # Print average proportion at the end
+        # if proportions:
+        #     avg_prop = sum(proportions) / len(proportions)
+        #     print(f"\nAverage proportion of accurate predictions over {len(proportions)} tokens: {avg_prop:.2f}")
+
+        
 
             #compute accuracy between target mask and predicted mask
-            layer_accuracy = torch.sum(target_expert_mask * predicted_expert_mask, dim=1) / torch.sum(target_expert_mask, dim=1)
+            layer_accuracy = torch.sum(target_expert_mask * predicted_expert_mask, dim=1) / torch.sum(target_expert_mask, dim=1)#n_layers*batch_size*seq_length
+            # print("Layer accuracy shape:", layer_accuracy.shape)
+            # print("layer accuracy:", layer_accuracy[0:10])
             mean_accuracy = torch.mean(layer_accuracy)
+            # print("mean accuracy:", mean_accuracy)
             total_acc.append(mean_accuracy)
             #accelerator.log({"test/accuracy": mean_accuracy.item()})
             pbar_test.update(1)
         if total_acc:
             mean_accuracy = torch.stack(total_acc).mean()
-            accelerator.log({"test/mean_accuracy": mean_accuracy.item()})
+            # print("mean accuracy:", mean_accuracy)
+            metrics_dict['test/mean_accuracy'] = mean_accuracy.item()
+            # accelerator.log({"test/mean_accuracy": mean_accuracy.item()})
         pbar_test.close()
 
 
