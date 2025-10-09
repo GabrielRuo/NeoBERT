@@ -13,8 +13,10 @@ loss:
   cost_based_loss_alpha_end: 1e-8
   cost_based_loss_schedule_tokens: 3000000
   cost_based_loss_epsilon: 1e-5
+  denominator_exponent: 1
   disable_task_performance_scaling: False
-  
+  alpha_scaling: 0.0
+
 
 
 
