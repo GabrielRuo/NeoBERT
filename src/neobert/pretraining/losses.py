@@ -283,11 +283,12 @@ def mop_loss_fn(logits, expert_usage_loss, cfg, batch, num_tokens):
     normalisation_factor = sum(expert_dims)
 
 
-    if cfg.model.loss.cost_based_loss_alpha_start > 0:
+    if cfg.model.loss.cost_based_loss_alpha_start > 0 and cfg.model.loss.cost_based_loss_alpha_end > 0:
             
             #compute logsum then exp to prevent overflow
             #cost_based_loss_alpha = min(cfg.model.loss.cost_based_loss_alpha_end, cfg.model.loss.cost_based_loss_alpha_start+ (cfg.model.loss.cost_based_loss_alpha_end - cfg.model.loss.cost_based_loss_alpha_start)*num_tokens / cfg.model.loss.cost_based_loss_schedule_tokens)
-            cost_based_loss_alpha = cfg.model.loss.cost_based_loss_alpha_end if num_tokens>cfg.model.loss.cost_based_loss_schedule_tokens else cfg.model.loss.cost_based_loss_alpha_start
+            linear_alpha = cfg.model.loss.alpha_scaling*cfg.model.loss.cost_based_loss_alpha_end*(num_tokens-cfg.model.loss.cost_based_loss_schedule_tokens)/cfg.model.loss.cost_based_loss_schedule_tokens
+            cost_based_loss_alpha = linear_alpha+cfg.model.loss.cost_based_loss_alpha_end if num_tokens>cfg.model.loss.cost_based_loss_schedule_tokens else cfg.model.loss.cost_based_loss_alpha_start
             cost_based_loss_alpha = torch.tensor(cost_based_loss_alpha, dtype=torch.float32, device=expert_usage_loss.device)
            
             normalisation_factor = torch.tensor(normalisation_factor, dtype=torch.float32, device=expert_usage_loss.device)
@@ -298,29 +299,35 @@ def mop_loss_fn(logits, expert_usage_loss, cfg, batch, num_tokens):
                 expert_loss = loss_numerator
             else:
                 loss_denominator = cfg.model.loss.cost_based_loss_epsilon + masked_lm_loss
+                loss_denominator = loss_denominator**cfg.model.loss.denominator_exponent
                 expert_loss = loss_numerator / loss_denominator
 
             train_loss = masked_lm_loss + expert_loss
+    else: 
+        train_loss = masked_lm_loss
+        expert_loss = torch.tensor(0.0, dtype=masked_lm_loss.dtype, device=masked_lm_loss.device)
+        cost_based_loss_alpha = torch.tensor(0.0, dtype=masked_lm_loss.dtype, device=masked_lm_loss.device)
+        
 
     return train_loss, masked_lm_loss, expert_loss, cost_based_loss_alpha
 
-from .analysis import get_normalised_expert_usage_cost_per_sequence
+# from ..Analysis.analysis import get_normalised_expert_usage_cost_per_sequence
 
-def mop_loss_fn_alt(logits, router_logits, cfg, batch, num_tokens):
+# def mop_loss_fn_alt(logits, router_logits, cfg, batch, num_tokens):
 
-    #compute a separate mlm_loss for each sequence in the batch
-    mlm_loss_fn = CrossEntropyLoss(reduction = "none")
-    train_loss = masked_lm_loss = mlm_loss_fn(logits.view(-1, cfg.tokenizer.vocab_size), batch["labels"].view(-1))#shape seq_length*nbatch_size
-    masked_lm_loss = masked_lm_loss.reshape(logits.size(0), logits.size(1))#shape (batch_size, seq_length)
-    mask = (batch["labels"] != -100).float()  # (batch_size, seq_len)
-    # Sum losses and normalize by number of valid tokens in each sequence
-    masked_lm_loss = (masked_lm_loss * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)#shape (batch_size,)
+#     #compute a separate mlm_loss for each sequence in the batch
+#     mlm_loss_fn = CrossEntropyLoss(reduction = "none")
+#     train_loss = masked_lm_loss = mlm_loss_fn(logits.view(-1, cfg.tokenizer.vocab_size), batch["labels"].view(-1))#shape seq_length*nbatch_size
+#     masked_lm_loss = masked_lm_loss.reshape(logits.size(0), logits.size(1))#shape (batch_size, seq_length)
+#     mask = (batch["labels"] != -100).float()  # (batch_size, seq_len)
+#     # Sum losses and normalize by number of valid tokens in each sequence
+#     masked_lm_loss = (masked_lm_loss * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)#shape (batch_size,)
 
-    #get the expert loss per sequence
-    expert_usage_loss = get_normalised_expert_usage_cost_per_sequence(router_logits, batch.get("attention_mask", None), cfg)#shape (batch_size,)
+#     #get the expert loss per sequence
+#     expert_usage_loss = get_normalised_expert_usage_cost_per_sequence(router_logits, batch.get("attention_mask", None), cfg)#shape (batch_size,)
 
-    expert_dims = [int(expert_size) for expert_size in cfg.model.expert_sizes.split(",")]
-    normalisation_factor = sum(expert_dims)
+#     expert_dims = [int(expert_size) for expert_size in cfg.model.expert_sizes.split(",")]
+#     normalisation_factor = sum(expert_dims)
 
 
     if cfg.model.loss.cost_based_loss_alpha_start > 0:
