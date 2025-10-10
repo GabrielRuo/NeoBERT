@@ -814,8 +814,10 @@ class NeoBERTForSequenceClassification(NeoBERTPreTrainedModel):
             if module.bias is not None:
                 module.bias.data.zero_()
 
-    def forward(self, src, pad_mask=None):
+    def forward(self, src, pad_mask=None, output_expert_usage_loss: bool = False, output_router_logits: bool = False):
         hidden_representation = self.model.forward(src, pad_mask)
+        NeoBERT_output = self.model.forward(src, pad_mask, output_expert_usage_loss,output_router_logits)
+        hidden_representation = NeoBERT_output["hidden_representation"]
 
         x = hidden_representation[:, 0, :]
         x = self.dropout(x)
@@ -825,7 +827,10 @@ class NeoBERTForSequenceClassification(NeoBERTPreTrainedModel):
 
         logits = self.classifier(x)
 
-        return {"hidden_representation": hidden_representation, "logits": logits}
+        NeoBERT_output["logits"] = logits
+        del NeoBERT_output["hidden_representation"]
+
+        return NeoBERT_output
 
 
 class NeoBERTHFForSequenceClassification(NeoBERTPreTrainedModel):
