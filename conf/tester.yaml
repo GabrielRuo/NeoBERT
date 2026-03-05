@@ -1,19 +1,18 @@
 defaults:
   - _self_
-  - dataset: minipile
-  - tokenizer: google_mini
-  - model: 
-    - neobert
-    - architecture_hetero_moe
-    - hetero_moe
+  - dataset: minipile_predictor
   - optimizer: adamw
+  - trainer: routing_pred
   - scheduler: cosine_decay
-  - trainer: 
-    - mlm
-  - dataloader: CRAMMINGdataloader
+  - dataloader: dataloader_predictor
   - datacollator: mlm_15
 
 seed: 0
+
+
+saved_model:
+  base_path: /runs/logs/checkpoints/mop_2025-08-15_16-07-06/
+  checkpoint: mop_100
 
 hydra:
   run:
@@ -28,6 +27,7 @@ wandb:
   dir: logs/wandb
   mode: online
   log_interval: 100
+
 
 
 

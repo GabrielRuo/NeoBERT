@@ -1,4 +1,14 @@
+
 import sys
+from dotenv import load_dotenv
+
+# Load secrets from .env file
+# ------------------------------
+# This reads environment variables from a local .env file. 
+# Make sure your .env file contains:
+#   HF_TOKEN=your_huggingface_token_here
+#   WANDB_API_KEY=your_wandb_api_key_here
+load_dotenv()
 
 modal = True
 cli_arguments= sys.argv[1:]

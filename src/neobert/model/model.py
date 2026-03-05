@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 import torch._dynamo
 torch._dynamo.config.suppress_errors = True
 
-#from xformers.ops import SwiGLU, memory_efficient_attention  #DOES NOT WORK ON A NODE WITH NO GPU
+#If using GPUs not CPU
+# from xformers.ops import SwiGLU, memory_efficient_attention  #DOES NOT WORK ON A NODE WITH NO GPU
 
 from datasets import Dataset
 
@@ -67,7 +68,7 @@ class NeoBERTConfig(PretrainedConfig):
         vocab_size: int = 32768,
         pad_token_id: int = 0,
         max_length: int = 1024,
-        flash_attention: bool = False, # SWITCH TO TRUE IN PRACTICE
+        flash_attention: bool = False,  # SWITCH TO TRUE if using xformers
         base_scale: float = 1.0 / (960.0**0.5),
         ngpt: bool = False,
         dropout_prob: float = 0.0,
@@ -338,7 +339,7 @@ class MoEBlock(nn.Module):
                 current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
                 current_hidden_states = expert_layer(current_state) * routing_weights[top_x, idx, None]
 
-                # However `index_add_` only support torch tensors for indexing so we'll use
+                # However `index_add_`only support torch tensors for indexing so we'll use
                 # the `top_x` tensor here.
                 final_hidden_states.index_add_(0, top_x, current_hidden_states.to(hidden_states.dtype))
             final_hidden_states = final_hidden_states.reshape(batch_size, sequence_length, hidden_dim)
@@ -465,11 +466,15 @@ class EncoderBlock(nn.Module):
 
         xq, xk, xv = self.qkv(x).view(batch_size, seq_len, self.config.num_attention_heads, self.config.dim_head * 3).chunk(3, axis=-1)
 
+        # @torch._dynamo.disable
+        def _untraced_flash_attention(*args,**kwargs):
+            return memory_efficient_attention(*args, **kwargs)
+         
         if self.config.rope:
             xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
 
         if self.config.flash_attention:
-            attn = memory_efficient_attention(query=xq, key=xk, value=xv, attn_bias=pad_mask, p=0)
+            attn = _untraced_flash_attention(query=xq, key=xk, value=xv, attn_bias=pad_mask, p=0)
         else:
             # Input and output are of dimension (B, H, M, K)
             attn = scaled_dot_product_attention(

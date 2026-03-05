@@ -438,6 +438,8 @@ class AnalysisMetrics:
         raw_routing_weights = torch.softmax(router_logits, dim=-1)
 
         if len(cfg.model.expert_sizes.split(',')) > 1:
+            print("multiple experts")
+            print(cfg.model.expert_sizes.split(','))
             expert_dims = [int(size) for size in cfg.model.expert_sizes.split(',')]
             expert_dims_tensor = torch.tensor(expert_dims,dtype=torch.float32,
                 device=raw_routing_weights.device )

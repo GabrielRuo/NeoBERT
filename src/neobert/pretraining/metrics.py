@@ -50,6 +50,10 @@ class Metrics(defaultdict):
             if model_type == "mop":
                 metrics_log["train/expert_loss"] = metrics_agg["train/local_sum_expert_loss"] / metrics_agg["train/local_num_pred"]
                 del metrics_log["train/local_sum_expert_loss"]
+
+                metrics_log["train/load_balancing_loss"] = metrics_agg["train/local_sum_load_balancing_loss"] / metrics_agg["train/local_num_pred"]
+                del metrics_log["train/local_sum_load_balancing_loss"]
+
             if model_type == "hetero_moe":
                 metrics_log["train/penalty_loss"] = metrics_agg["train/local_sum_penalty_loss"] / metrics_agg["train/local_num_pred"]
                 metrics_log["train/entropy_loss"] = metrics_agg["train/local_sum_entropy_loss"] / metrics_agg["train/local_num_pred"]

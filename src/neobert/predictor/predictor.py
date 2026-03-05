@@ -682,7 +682,7 @@ def run_test_batches(BERTpredictor, neobert_model, test_dataloader, accelerator,
                 input_ids_flat = batch["input_ids"].view(-1)
                 seq_len = input_ids_flat.shape[0]
                 # Randomly sample up to 10 unique token indices
-                indices = np.random.choice(seq_len, min(num_visualisations, seq_len), replace=False)
+                indices = np.random.choice(seq_len, min(num_visualisations, seq_len), replace=False)  
                 for token_index in indices:
                     token_id = input_ids_flat[token_index].item()
                     try:

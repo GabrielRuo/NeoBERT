@@ -1,6 +1,6 @@
 import torch
 from typing import Union
-from torch.nn import CrossEntropyLoss
+from torch.nn import CrossEntropyLoss, MSELoss
 from omegaconf import DictConfig
 from collections import defaultdict
 import pandas as pd
@@ -23,8 +23,10 @@ class AnalysisMetrics:
         assert isinstance(gate_logits, tuple), "gate_logits should be a tuple of tensors, one per layer"
 
         n_layers = len(gate_logits)
-        batch_size = cfg.dataloader.train.batch_size
-        seq_length = cfg.tokenizer.max_length
+        #batch_size = cfg.dataloader.train.batch_size
+        batch_size,seq_length = attention_mask.shape
+        #seq_length = cfg.tokenizer.max_length
+
         compute_device = gate_logits[0].device
 
         # Convert tuple to a single tensor
@@ -57,8 +59,9 @@ class AnalysisMetrics:
 
         n_layers = len(gate_logits)
         num_experts = gate_logits[0].shape[-1]
-        batch_size = cfg.dataloader.train.batch_size
-        seq_length = cfg.tokenizer.max_length
+        #batch_size = cfg.dataloader.train.batch_size
+        batch_size,seq_length = attention_mask.shape
+        #seq_length = cfg.tokenizer.max_length
         compute_device = gate_logits[0].device
 
         #convert tuple to a single tensor
@@ -118,14 +121,32 @@ class AnalysisMetrics:
         Returns:
             torch.Tensor: The distribution of logits sent to each expert across all tokens in the batch.
         """
-        mean_selected_expert_per_layer_per_token, max_selected_expert_per_layer_per_token = self._get_mean__and_max_expert_usage_per_layer_per_token(gate_logits, attention_mask, cfg)  # shape (n_layers,batch_size*seq_length)
-        mean_selected_expert_per_layer = torch.mean(mean_selected_expert_per_layer_per_token, dim=1)  # shape (n_layers,) #mean across tokens
-        max_selected_expert_per_layer = torch.max(max_selected_expert_per_layer_per_token, dim=1)[0]  # shape (n_layers,) #max across tokens
+
+        batch_size,seq_length = attention_mask.shape
+        compute_device = gate_logits[0].device
+
+        mean_selected_expert_per_layer_per_token, max_selected_expert_per_layer_per_token = self._get_mean_and_max_expert_usage_per_layer_per_token(gate_logits, attention_mask, cfg)  # shape (n_layers,batch_size*seq_length)
+        
+        #eliminate padding tokens from the computation: bring multiplicative attention mask to shape (1,batch_size*seq_length)
+        multiplicative_attention_mask = (attention_mask != float('-inf')).float().to(compute_device)# 1 for unmasked tokens, 0 for masked tokens: shape (batch_size, seq_length)
+        multiplicative_attention_mask = multiplicative_attention_mask.reshape(1,batch_size*seq_length)  # shape (batch_size*seq_length,) 
+        mean_selected_expert_per_layer_per_token = mean_selected_expert_per_layer_per_token * multiplicative_attention_mask  # shape (n_layers,batch_size*seq_length)
+        max_selected_expert_per_layer_per_token = max_selected_expert_per_layer_per_token * multiplicative_attention_mask  # shape (n_layers,batch_size*seq_length)   
+        
+        #compute the means given we have zeroes out the padding tokens
+        sum_mean_selected_expert_per_layer_per_token = torch.sum(mean_selected_expert_per_layer_per_token, dim=1)
+        mean_selected_expert_per_layer = sum_mean_selected_expert_per_layer_per_token / (multiplicative_attention_mask.sum(dim=1) + 1e-8)# shape (n_layers,) #mean across tokens
+
+        sum_max_selected_expert_per_layer_per_token = torch.sum(max_selected_expert_per_layer_per_token, dim=1) 
+        max_selected_expert_per_layer = sum_max_selected_expert_per_layer_per_token / (multiplicative_attention_mask.sum(dim=1) + 1e-8)# shape (n_layers,) #max across tokens
+
+        # mean_selected_expert_per_layer = torch.mean(mean_selected_expert_per_layer_per_token, dim=1)  # shape (n_layers,) #mean across tokens
+        # max_selected_expert_per_layer = torch.mean(max_selected_expert_per_layer_per_token.float(), dim=1)  
 
         return mean_selected_expert_per_layer, max_selected_expert_per_layer
 
 
-    def _get_mean__and_max_expert_usage_per_layer_per_token(self,gate_logits: tuple[torch.Tensor], attention_mask: torch.Tensor, cfg: DictConfig) -> tuple[torch.Tensor, torch.Tensor]:
+    def _get_mean_and_max_expert_usage_per_layer_per_token(self,gate_logits: tuple[torch.Tensor], attention_mask: torch.Tensor, cfg: DictConfig) -> tuple[torch.Tensor, torch.Tensor]:
         assert isinstance(gate_logits, tuple), "gate_logits should be a tuple of tensors, one per layer"
 
         n_layers = len(gate_logits)
@@ -137,18 +158,24 @@ class AnalysisMetrics:
 
         # Convert tuple to a single tensor
         concatenated_gate_logits = self._get_concatenated_gate_logits(gate_logits, attention_mask, cfg)  # n_layers*batch_size*seq_length,num_experts
+        #careful the logits for the padding tokens are zeroed out, so when computing softmax they will have equal probas across all experts and all this will bias the computation of mean expert usage towards the center of the expert indices
 
         # Aggregate the probabilities per expert across all tokens
         concatenated_gate_logits_per_layer = concatenated_gate_logits.reshape(n_layers,-1, num_experts)  # shape (n_layers,batch_size*seq_length,num_experts)
         concatenated_gate_softmax_per_layer = torch.nn.functional.softmax(concatenated_gate_logits_per_layer, dim=-1) # shape (n_layers,batch_size*seq_length,num_experts)
+       
+        #eliminate padding tokens from the computation
+
+        #compute mean and max expert per layer for each token
         mean_selected_expert_per_layer = torch.einsum('men,n->me', concatenated_gate_softmax_per_layer, expert_indices)  # shape (n_layers,batch_size*seq_length)
+
         max_selected_expert_per_layer = torch.argmax(concatenated_gate_softmax_per_layer, dim=-1)  # shape (n_layers,batch_size*seq_length)
 
         return mean_selected_expert_per_layer,max_selected_expert_per_layer
 
     #token level metrics
     
-    def get_inter_token_normalised_expert_cost_rel_std(self,router_logits: tuple[torch.Tensor], attention_mask: torch.Tensor, cfg: DictConfig) -> torch.Tensor:
+    def get_inter_token_normalised_expert_cost_rel_std(self,router_logits: tuple[torch.Tensor], attention_mask: torch.Tensor, cfg: DictConfig) -> tuple[torch.Tensor,torch.Tensor,torch.Tensor]:
         """Compute the relative standard deviation of the expert usage cost across all tokens in a batch: std/mean"""
 
         normalised_expert_usage_loss_per_token_and_layer, number_of_tokens_per_seq = self._get_normalised_expert_usage_per_token_and_layer(router_logits, attention_mask, cfg)#(n_layers,batch_size,seq_length)
@@ -158,9 +185,10 @@ class AnalysisMetrics:
         mean_normalised_expert_usage_loss = torch.sum(normalised_expert_usage_loss_per_token)/ num_tokens #shape (1,)
         mean_squared_normalised_expert_usage_loss_per_token = torch.sum(normalised_expert_usage_loss_per_token**2) / num_tokens #shape (1,)
         var_normalised_expert_usage_loss = mean_squared_normalised_expert_usage_loss_per_token - mean_normalised_expert_usage_loss**2
+        std_normalised_expert_usage_loss = torch.sqrt(var_normalised_expert_usage_loss)
 
-        inter_token_normalised_expert_usage_loss_rel_std = torch.sqrt(var_normalised_expert_usage_loss) / (mean_normalised_expert_usage_loss + 1e-10) #shape (1,): relative std = std/mean
-        return inter_token_normalised_expert_usage_loss_rel_std #shape (1,)
+        inter_token_normalised_expert_usage_loss_rel_std = std_normalised_expert_usage_loss / (mean_normalised_expert_usage_loss + 1e-10) #shape (1,): relative std = std/mean
+        return inter_token_normalised_expert_usage_loss_rel_std, std_normalised_expert_usage_loss,mean_normalised_expert_usage_loss #shape (1,)
 
     def get_df_of_average_token_usage(self,token_expert_usage_dict: defaultdict,tokenizer) -> pd.DataFrame:
         """Convert a dictionary of token expert usage information into a pandas DataFrame.
@@ -196,8 +224,9 @@ class AnalysisMetrics:
         """
         n_layers = len(batch_gate_logits)
         num_experts = batch_gate_logits[0].shape[-1]
-        batch_size = cfg.dataloader.train.batch_size
-        seq_length = cfg.tokenizer.max_length
+        #batch_size = cfg.dataloader.train.batch_size
+        batch_size,seq_length = batch_input_id.shape
+        #seq_length = cfg.tokenizer.max_length
         compute_device = batch_gate_logits[0].device
         expert_indices = torch.arange(num_experts, device=compute_device, dtype=batch_gate_logits[0].dtype)
 
@@ -233,8 +262,9 @@ class AnalysisMetrics:
 
         n_layers = len(gate_logits)
         num_experts = gate_logits[0].shape[-1]
-        batch_size = cfg.dataloader.train.batch_size
-        seq_length = cfg.tokenizer.max_length
+        #batch_size = cfg.dataloader.train.batch_size
+        batch_size,seq_length = attention_mask.shape
+        #seq_length = cfg.tokenizer.max_length
         compute_device = gate_logits[0].device
 
         # Convert tuple to a single tensor
@@ -242,13 +272,23 @@ class AnalysisMetrics:
 
         # Apply attention mask to ignore padding tokens
         concatenated_gate_logits = concatenated_gate_logits.reshape(n_layers, batch_size, seq_length, num_experts)  # shape (n_layers,batch_size, seq_length,num_experts)
-        if attention_mask is not None:
-            multiplicative_attention_mask = (attention_mask != float('-inf')).float().to(compute_device)  # 1 for unmasked tokens, 0 for masked tokens
-            concatenated_gate_logits = concatenated_gate_logits * multiplicative_attention_mask.reshape(1, batch_size, seq_length, 1)  # shape (n_layers,batch_size,seq_length,num_experts)
+        # if attention_mask is not None:
+        #     multiplicative_attention_mask = (attention_mask != float('-inf')).float().to(compute_device)  # 1 for unmasked tokens, 0 for masked tokens shape (batch_size, seq_length)
+        #     concatenated_gate_logits = concatenated_gate_logits * multiplicative_attention_mask.reshape(1, batch_size, seq_length, 1)  # shape (n_layers,batch_size,seq_length,num_experts)
 
         # Aggregate the logits per expert across all tokens
         concatenated_gate_logits = concatenated_gate_logits.reshape(-1, seq_length, num_experts)  # shape (n_layers*batch_size, seq_length,num_experts)
         concatenated_gate_softmax = torch.nn.functional.softmax(concatenated_gate_logits, dim=-1)  # shape (n_layers*batch_size, seq_length,num_experts)
+
+        #still need to filter out the padding tokens
+        if attention_mask is not None:
+            multiplicative_attention_mask = (attention_mask != float('-inf')).float().to(compute_device)  # 1 for unmasked tokens, 0 for masked tokens shape (batch_size, seq_length)
+             #multiplicative attention_mask shape (batch_size, seq_length) -> (n_layers*batch_size, seq_length,1)
+            multiplicative_attention_mask = multiplicative_attention_mask.reshape(1,batch_size,seq_length,1)
+            multiplicative_attention_mask = multiplicative_attention_mask.expand(n_layers,-1,-1, -1)
+            multiplicative_attention_mask = multiplicative_attention_mask.reshape(-1,seq_length,1)
+            concatenated_gate_softmax = concatenated_gate_softmax * multiplicative_attention_mask  # shape (n_layers*batch_size, seq_length, num_experts)
+
         expert_cum_prob = torch.sum(concatenated_gate_softmax, dim=(0,1))  # shape (n_layers*batch_size, num_experts)
 
         return expert_cum_prob
@@ -286,8 +326,9 @@ class AnalysisMetrics:
         """
         n_layers = len(batch_gate_logits)
         num_experts = batch_gate_logits[0].shape[-1]
-        batch_size = cfg.dataloader.train.batch_size
-        seq_length = cfg.tokenizer.max_length
+        #batch_size = cfg.dataloader.train.batch_size
+        batch_size,seq_length = batch_input_id.shape
+        #seq_length = cfg.tokenizer.max_length
         compute_device = batch_gate_logits[0].device
         expert_indices = torch.arange(num_experts, device=compute_device, dtype=batch_gate_logits[0].dtype)
 
@@ -320,8 +361,9 @@ class AnalysisMetrics:
 
         n_layers = len(gate_logits)
         num_experts = gate_logits[0].shape[-1]
-        batch_size = cfg.dataloader.train.batch_size
-        seq_length = cfg.tokenizer.max_length
+        #batch_size = cfg.dataloader.train.batch_size
+        batch_size,seq_length = attention_mask.shape
+        #seq_length = cfg.tokenizer.max_length
         compute_device = gate_logits[0].device
 
         #convert tuple to a single tensor
@@ -424,6 +466,35 @@ class AnalysisMetrics:
         return filtered_normalised_expert_usage_loss_per_token #shape (batch_size,seq_length) or None if single expert
 
 
+    def get_normalised_expert_usage_cost_per_token(self,router_logits: tuple[torch.Tensor], attention_mask: torch.Tensor, batch:dict, cfg: DictConfig,tokenizer) -> torch.Tensor:
+        """_summary_
+        Compute the expert usage cost per token in a batch. 
+        Result is normalised by the size of the experts as we do not care about the absolute value.
+
+        Args:
+            router_logits (_type_): _description_
+            attention_mask (_type_): _description_
+            cfg (_type_): _description_
+
+        Returns:
+            _type_: _description_
+        """
+        normalised_expert_usage_loss_per_token_and_layer, number_of_tokens_per_seq = self._get_normalised_expert_usage_per_token_and_layer(router_logits, attention_mask, cfg)#(n_layers,batch_size,seq_length)   
+        #sum across layers
+        normalised_expert_usage_loss_per_token = torch.sum(normalised_expert_usage_loss_per_token_and_layer, dim=0) #shape (batch_size,seq_length)
+        
+
+        # mask_token_id = tokenizer.mask_token_id #103
+        padding_token_id = tokenizer.pad_token_id#0
+        mask = (batch["input_ids"] != padding_token_id).float()  # (batch_size, seq_len) # keep all tokens which are not padding tokens
+
+        #reshape 
+        mask = mask.reshape(-1) #shape (batch_size*seq_length,)
+        normalised_expert_usage_loss_per_token = normalised_expert_usage_loss_per_token.reshape(-1) #shape (batch_size*seq_length,)
+        # filtered_normalised_expert_usage_loss_per_token = normalised_expert_usage_loss_per_token[mask == 1] #keep only masked tokens
+
+        return normalised_expert_usage_loss_per_token #shape (batch_size,seq_length) or None if single expert
+
     def get_normalised_expert_usage_cost_per_sequence(self,router_logits: tuple[torch.Tensor], attention_mask: torch.Tensor, cfg: DictConfig) -> torch.Tensor:
         """_summary_
         Compute the expert usage cost per sequence in a batch. 
@@ -502,6 +573,65 @@ class AnalysisMetrics:
         masked_lm_loss = (masked_lm_loss * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)#shape (batch_size,)
 
         return masked_lm_loss #shape (batch_size,): average loss per sequence ignoring tokens not used fo loss computation
+    
+    def get_task_loss_per_sequence(self,logits,batch,is_regression, num_labels):
+        """
+        Compute the task loss per sequence for finetuning tasks.We don't want the mean loss per batch but per sequence.
+
+        Args:
+            logits: The model predictions. #shape (batch_size, seq_length, vocab_size)
+            cfg: Configuration object containing model parameters.
+            loss_fct: The loss function to use, here with reduction = 'none'
+
+
+        Returns:
+            The computed task loss per sequence.
+            """
+        if not is_regression:
+            loss_fct = CrossEntropyLoss(reduction="none")
+        else:
+            loss_fct = MSELoss(reduction="none")
+
+        if not is_regression:
+            loss = loss_fct(logits.view(-1, num_labels), batch["labels"].view(-1))
+        else:
+            if num_labels == 1:
+                loss = loss_fct(logits.squeeze(), batch["labels"].squeeze())
+            else:
+                loss = loss_fct(logits, batch["labels"])
+
+        return loss #shape (batch_size,)
+
+    def get_task_loss_per_token(self,logits,batch,is_regression, num_labels, attention_mask):
+        """
+        Compute the task loss per token for finetuning tasks.We don't want the mean loss per batch but per sequence.
+
+        Args:
+            logits: The model predictions. #shape (batch_size, seq_length, vocab_size)
+            cfg: Configuration object containing model parameters.
+            loss_fct: The loss function to use, here with reduction = 'none'
+            attention_mask: The attention mask to identify valid tokens. #shape (batch_size, seq_length)
+
+
+        Returns:
+            The computed task loss per sequence.
+            """
+        batch_size, seq_length = attention_mask.shape
+        if not is_regression:
+            loss_fct = CrossEntropyLoss(reduction="none")
+        else:
+            loss_fct = MSELoss(reduction="none")
+
+        if not is_regression:
+            loss = loss_fct(logits.view(-1, num_labels), batch["labels"].view(-1))
+        else:
+            if num_labels == 1:
+                loss = loss_fct(logits.squeeze(), batch["labels"].squeeze())
+            else:
+                loss = loss_fct(logits, batch["labels"])               
+
+        loss = loss.unsqueeze(1).repeat(1,seq_length) #shape (batch_size, seq_length)
+        return loss #shape (batch_size,seq_length): average loss per sequence ignoring tokens not used fo loss computation
     
     def get_cross_entropy_per_masked_token(self,logits, cfg, batch,tokenizer):
         """

@@ -9,10 +9,6 @@ import datetime
 
 import numpy as np
 
-#from NeoBERT.NeoBERT_dev.src.neobert.contrastive import metrics
-from ..pretraining.losses import general_mop_loss_fn_balanced
-from ..analysis import AnalysisFinetuning
-
 import evaluate
 import torch
 from torch.nn import CrossEntropyLoss, MSELoss
@@ -78,32 +74,20 @@ def get_evaluation(
     return_predictions=False,
     compute_metric=True,
     flash_attention=False,
-    metrics_dict=None,
-    analysistraining=None,
-    num_labels=None,
-    training_step=None
 ):
     samples_seen = 0
     predictions = torch.Tensor()
     eval_metric = None
     progress_bar = tqdm(range(len(dataloader)), desc="Running evaluation...")
     for step, batch in tqdm(enumerate(dataloader)):
-        #for fast eval for testing
-        # if step >10:
-        #     break
-
+        if step>10: break  # For faster evaluation during testing
         progress_bar.update(1)
         with torch.no_grad():
             if flash_attention:
                 pad_mask = torch.where(batch["attention_mask"] == 1, float(0.0), float("-inf")).type(dtype_pad_mask)
             else:
                 pad_mask = batch["attention_mask"].type(dtype_pad_mask)
-            model_output = model(batch["input_ids"], pad_mask, output_expert_usage_loss=True, output_router_logits=True)
-            logits = model_output["logits"]
-
-            if analysistraining is not None:
-                analysistraining(batch, model_output, step,training_step, metrics_dict, is_regression, num_labels, dataloader,training=False)
-
+            logits = model(batch["input_ids"], pad_mask)["logits"]
 
         if not is_regression:
             batch_predictions = logits.argmax(dim=-1)
@@ -207,16 +191,7 @@ def save_checkpoint(cfg, model, accelerator, completed_steps, model_checkpoint_d
             os.path.join(path, "state_dict.pt"),
         )
 
-def get_config(base_path):
-    local_logs_dir = Path(__file__).parent.parent / 'src' / 'neobert' / 'runs' / 'logs'
-    """extract configuration from the base pretrained model"""
-    cfg_path = os.path.join(base_path,"config.yaml")
-    cfg = OmegaConf.load(cfg_path)
-    return cfg
-
 def trainer(cfg: DictConfig):
-
-    
 
     model_dir = os.path.join(cfg.model.pretrained_checkpoint_dir, "glue", str(cfg.task))
     os.makedirs(model_dir, exist_ok=True)
@@ -233,22 +208,12 @@ def trainer(cfg: DictConfig):
         mixed_precision="no" if cfg.trainer.mixed_precision == "fp32" else cfg.trainer.mixed_precision,
         project_config=project_config,
     )
-    
-
     # Initialise the wandb run and pass wandb parameters
-
-    
-    base_name = f"finetuning: {cfg.task}, alpha: {cfg.model.loss.cost_based_loss_alpha_end:.1e},lb: {cfg.model.loss.load_balancing_loss_coeff:1e}"
-            
-    if accelerator.is_main_process:
-        time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        wandb_name = base_name + "_" + time_str
-
     accelerator.init_trackers(
         project_name=cfg.wandb.project,
         init_kwargs={
             "wandb": {
-                "name": wandb_name,
+                "name": cfg.wandb.name,
                 "entity": cfg.wandb.entity,
                 "config": OmegaConf.to_container(cfg) | {"distributed_type": accelerator.distributed_type},
                 "tags": cfg.wandb.tags,
@@ -258,9 +223,7 @@ def trainer(cfg: DictConfig):
             }
         },
     )
- 
 
-    
     set_seed(int(cfg.seed))
 
     # Enable TF32 on matmul and on cuDNN
@@ -283,8 +246,6 @@ def trainer(cfg: DictConfig):
                     os.remove(os.path.join(model_dir, str(file)))
         os.makedirs(model_dir, exist_ok=True)
     accelerator.wait_for_everyone()
-
-    
 
     flash_attention = cfg.flash_attention if "flash_attention" in cfg.keys() else True
     if cfg.model.from_hub:
@@ -450,19 +411,6 @@ def trainer(cfg: DictConfig):
             classifier_dropout=cfg.model.classifier_dropout,
             classifier_init_range=cfg.model.classifier_init_range,
         )
-        cfg_pretrained = get_config(cfg.model.pretrained_checkpoint_dir)
-        # update the cfg_pretrained with cfg values that might have changed for finetuning
-
-        cfg_pretrained.model.loss.cost_based_loss_alpha_end = cfg.model.loss.cost_based_loss_alpha_end
-        cfg_pretrained.model.loss.cost_based_loss_epsilon = cfg.model.loss.cost_based_loss_epsilon
-        cfg_pretrained.model.loss.denominator_exponent = cfg.model.loss.denominator_exponent
-        cfg_pretrained.model.loss.load_balancing_loss_coeff = cfg.model.loss.load_balancing_loss_coeff
-        cfg_pretrained.model.loss.disable_task_performance_scaling = cfg.model.loss.disable_task_performance_scaling
-    
-        training_metrics_dict={}
-        eval_metrics_dict={}
-        analysistraining = AnalysisFinetuning(cfg_pretrained, accelerator)
-        
     if cfg.model.transfer_from_task:
         task_to_transfer_from = TASK_TO_TRANSFER_FROM.get(cfg.task, None)
         if not task_to_transfer_from:
@@ -492,18 +440,8 @@ def trainer(cfg: DictConfig):
                 continue
             else:
                 new_state_dict[k] = v
-        
-        model.load_state_dict(new_state_dict, strict=False)#strict False to ignore missing keys for classifier and randomly initialise the classifier weights
 
-        if cfg.model.random_init_model:
-            model = NeoBERTForSequenceClassification(
-            NeoBERTConfig(**model_pretraining_config.model, **model_pretraining_config.tokenizer),
-            num_labels=num_labels,
-            classifier_dropout=cfg.model.classifier_dropout,
-            classifier_init_range=cfg.model.classifier_init_range,
-        )
-            
-        #save the LM head as well to be able to test how the model keeps faring on MLM task after finetuning
+        model.load_state_dict(new_state_dict, strict=False)#strict False to ignore missing keys for classifier and randomly initialise the classifier weights
         # this is using deepseed
         # try:
         #     model = load_state_dict_from_zero_checkpoint(
@@ -547,12 +485,10 @@ def trainer(cfg: DictConfig):
             UserWarning("Overrinding number of decay steps based on decay percentage.")
         cfg.scheduler.decay_steps = math.ceil(cfg.trainer.max_steps / 100 * cfg.scheduler.decay_percent)
 
-    # cfg.scheduler.warmup_steps = 50
-    # cfg.scheduler.decay_steps = 100
-    
     scheduler = get_scheduler(optimizer=optimizer, lr=cfg.optimizer.hparams.lr, **cfg.scheduler)
 
-    
+    cfg.scheduler.warmup_steps = 50
+    cfg.scheduler.decay_steps = 50
 
     print(" scheduler decay steps:", cfg.scheduler.decay_steps)
 
@@ -560,10 +496,6 @@ def trainer(cfg: DictConfig):
     model, optimizer, train_dataloader, eval_dataloader, scheduler = accelerator.prepare(
         model, optimizer, train_dataloader, eval_dataloader, scheduler
     )
-
-    print("Number of batches per epoch seen by this process:", len(train_dataloader))
-    print("Gradient accumulation steps:", cfg.trainer.gradient_accumulation_steps)
-    
 
     if cfg.task == "mnli":
         mm_eval_dataloader = accelerator.prepare(mm_eval_dataloader)
@@ -574,9 +506,6 @@ def trainer(cfg: DictConfig):
         cfg.trainer.max_steps = cfg.trainer.num_train_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
     cfg.trainer.num_train_epochs = math.ceil(cfg.trainer.max_steps / num_update_steps_per_epoch)
-    print(" max train steps:", cfg.trainer.max_steps)
-    print(" warmup steps:", cfg.scheduler.warmup_steps)
-    print(" decay steps:", cfg.scheduler.decay_steps)
 
     # Overwrite the number of steps performed between evaluation based on the dataset size.
     cfg.trainer.eval_steps = min(cfg.trainer.eval_steps, len(train_dataset) // cfg.trainer.train_batch_size)
@@ -646,15 +575,11 @@ def trainer(cfg: DictConfig):
     prev_accuracy = 0
     early_stopping_counter = 1
 
-    train_test_metric_dict = {}
-    prev_lr=0
-
     for epoch in range(starting_epoch, cfg.trainer.num_train_epochs):
         for batch in train_dataloader:
 
-            model_output = model(batch["input_ids"], batch["attention_mask"], output_expert_usage_loss=True,output_router_logits=True)
-            logits = model_output["logits"]
-            # logits = model(batch["input_ids"], batch["attention_mask"])["logits"]
+
+            logits = model(batch["input_ids"], batch["attention_mask"])["logits"]
 
             if not is_regression:
                 loss = loss_fct(logits.view(-1, num_labels), batch["labels"].view(-1))
@@ -663,19 +588,6 @@ def trainer(cfg: DictConfig):
                     loss = loss_fct(logits.squeeze(), batch["labels"].squeeze())
                 else:
                     loss = loss_fct(logits, batch["labels"])
-            
-            if cfg.model.use_mop_loss:
-                loss,task_loss,expert_loss, load_balancing_loss, cost_based_loss_alpha = general_mop_loss_fn_balanced(loss, model_output['router_logits'],model_output['expert_usage_loss'], cfg_pretrained, batch)
-
-
-            for input_sequence in batch["input_ids"]:
-                input_sequence_str = tokenizer.decode(input_sequence, skip_special_tokens=True)
-                # print("Input sequence:", input_sequence_str)
-                # print("Task loss:", task_loss)
-                # print("Expert loss:", expert_loss)
-                # print("Load balancing loss:", load_balancing_loss)
-                # print("")
-                
 
             # Compute train accuracy
             predictions = logits.argmax(dim=-1) if not is_regression else (logits.squeeze() if logits.size() != torch.Size([1]) else logits)
@@ -687,83 +599,8 @@ def trainer(cfg: DictConfig):
                 predictions=predictions,
                 references=references,
             )
-            
-
-            
 
             accelerator.backward(loss)
-
-            grad_norm = (sum([p.grad.norm(2) ** 2 for p in model.parameters() if p.grad is not None]) ** 0.5).item()
-            grad_norm_per_param = grad_norm / (sum(p.numel() for p in model.parameters() if p.grad is not None))
-
-                        # plot gradients of the gates and of the experts
-            gate_grad_norm = 0.0
-            expert_grad_norm = 0.0
-            embedding_grad_norm = 0.0
-            attention_grad_norm = 0.0
-            decoder_grad_norm = 0.0
-            head_grad_norm = 0.0
-
-
-            num_gate_params = 0.0
-            num_expert_params = 0.0
-            num_embedding_params = 0.0
-            num_attention_params = 0.0
-            num_decoder_params = 0.0
-            num_head_params = 0.0
-            
-
-
-
-            for name, param in model.named_parameters():
-                # print(name)
-                if param.grad is not None:
-                    if "gate" in name:
-                        gate_grad_norm += param.grad.norm(2).item() ** 2
-                        num_gate_params += param.numel()
-
-                    if "experts" in name:
-                        expert_grad_norm += param.grad.norm(2).item() ** 2
-                        num_expert_params += param.numel()
-                        # print(num_expert_params)
-                    #if "model.encoder" in name or "decoder" in name or "model.positional_embedding" in name:
-                    if "model.encoder" in name or "model.positional_embedding" in name:    
-                        embedding_grad_norm += param.grad.norm(2).item() ** 2
-                        num_embedding_params += param.numel()
-                    #if "model.encoder" in name or "decoder" in name or "model.positional_embedding" in name:
-                    if "decoder" in name:
-                        decoder_grad_norm += param.grad.norm(2).item() ** 2
-                        num_decoder_params += param.numel()
-                    if "qkv" in name or "wo" in name:
-                        attention_grad_norm  += param.grad.norm(2).item() ** 2
-                        num_attention_params += param.numel()
-                    if "dense" in name or "classifier" in name:
-                        head_grad_norm  += param.grad.norm(2).item() ** 2
-                        num_head_params += param.numel()
-                    
-
-            
-
-            total_num_params = num_gate_params + num_expert_params + num_embedding_params + num_attention_params+ num_decoder_params + num_head_params
-            total_grads = (gate_grad_norm + expert_grad_norm + embedding_grad_norm + attention_grad_norm + decoder_grad_norm + head_grad_norm) ** 0.5
-            
-            training_metrics_dict["train/rel_prop_gate_grad_norm"] = (gate_grad_norm ** 0.5)/total_grads * (total_num_params / num_gate_params)if num_gate_params !=0 else 0
-            training_metrics_dict["train/rel_prop_expert_grad_norm"] = (expert_grad_norm ** 0.5)/total_grads * (total_num_params / num_expert_params)if num_expert_params !=0 else 0
-            training_metrics_dict["train/rel_prop_embedding_grad_norm"] = (embedding_grad_norm ** 0.5)/total_grads * (total_num_params / num_embedding_params)if num_embedding_params !=0 else 0
-            training_metrics_dict["train/rel_prop_attention_grad_norm"] = (attention_grad_norm ** 0.5)/total_grads * (total_num_params / num_attention_params)if num_attention_params !=0 else 0
-            training_metrics_dict["train/abs_embedding_grad_norm"] = (embedding_grad_norm ** 0.5)
-            training_metrics_dict["train/abs_attention_grad_norm"] = (attention_grad_norm ** 0.5)
-            training_metrics_dict["train/abs_decoder_grad_norm"] = (decoder_grad_norm ** 0.5)
-            training_metrics_dict["train/abs_head_grad_norm"] = (head_grad_norm ** 0.5)
-
-            training_metrics_dict["train/prop_decoder_grad_norm"] = (decoder_grad_norm ** 0.5)/total_grads
-            training_metrics_dict["train/prop_expert_grad_norm"] = (expert_grad_norm ** 0.5)/total_grads
-            training_metrics_dict["train/prop_embedding_grad_norm"] = (embedding_grad_norm ** 0.5)/total_grads
-            training_metrics_dict["train/prop_gate_grad_norm"] = (gate_grad_norm ** 0.5)/total_grads 
-            training_metrics_dict["train/prop_attention_grad_norm"] = (attention_grad_norm ** 0.5)/total_grads
-            training_metrics_dict["train/prop_head_grad_norm"] = (head_grad_norm ** 0.5)/total_grads
-
-
             optimizer.step()
             scheduler.step()
 
@@ -772,66 +609,10 @@ def trainer(cfg: DictConfig):
 
             # We keep track of the loss at each epoch
             total_loss += loss.item()
-                #here they are not total losses
-
-            if cfg.model.use_mop_loss:
-                training_metrics_dict.update({
-                    "task_loss": task_loss,
-                    "expert_loss":expert_loss,
-                    "load_balancing_loss": load_balancing_loss,
-                    "cost_based_loss_alpha": cost_based_loss_alpha,
-                })
-
-            analysistraining(batch, model_output, eval_step=None, training_step=completed_steps, metrics_dict=training_metrics_dict, is_regression=is_regression, num_labels=num_labels, training=True, eval_dataloader=None)
-            
-
-            
 
             # Run evaluation
-            if completed_steps % min(cfg.trainer.eval_steps, len(train_dataloader) * cfg.trainer.train_batch_size // 10) == 0:
-            # if completed_steps % 10 == 0:
-            
-            
-                # Helper — unwrap Accelerate wrapper if present
-                real_sched = scheduler.scheduler if hasattr(scheduler, "scheduler") else scheduler
-
-                # for k in dir(real_sched):
-                #     if not k.startswith("_"):
-                #         try:
-                #             print(f"{k}: {getattr(real_sched, k)}")
-                #         except Exception:
-                #             pass
-                
-                
-                print(dir(real_sched))
-                print("scheduler state dict:", real_sched.state_dict())
-
-                print("logits:", logits)
-                print("input_ids:", batch["input_ids"])
-                print("attention_mask:", batch["attention_mask"])
-                print("loss:", loss.item())
-
-                
-
-                
-
-                # ---- Debug info ----
-                print(f"\n[Step {completed_steps}]")
-                print(f"  Global step: {real_sched.last_epoch}")
-                if hasattr(real_sched, "_milestones"):
-                    print(f"  Milestones: {real_sched._milestones}")
-                print(f"  Current LR: {optimizer.param_groups[0]['lr']:.6f}")
-
-                # ---- Decay rate estimation ----
-                lrs = [pg["lr"] for pg in optimizer.param_groups]
-                print(f"Step {completed_steps} | Current LR {lrs[0]:.8f}")
-
-                if completed_steps > 0:
-                    decay_rate = prev_lr - lrs[0]
-                    print(f"  Approx instantaneous decay rate: {decay_rate:.8e}")
-
-                prev_lr = lrs[0]
-
+            # if completed_steps % min(cfg.trainer.eval_steps, len(train_dataloader) * cfg.trainer.train_batch_size // 10) == 0:
+            if completed_steps % 10 == 0:
                 train_metric = metric.compute()
                 if len(train_metric) > 1:
                     train_metric["combined_score"] = np.mean(list(train_metric.values())).item()
@@ -846,13 +627,7 @@ def trainer(cfg: DictConfig):
                     is_regression=is_regression,
                     return_predictions=False,
                     flash_attention=flash_attention,
-                    metrics_dict=eval_metrics_dict,
-                    analysistraining=analysistraining,
-                    num_labels=num_labels,
-                    training_step=completed_steps,
                 )["eval_metric"]
-
-                print("eval metric:", eval_metric)
 
                 logger.info(f"step {completed_steps} eval metric: {eval_metric}")
                 logger.info(f"step {completed_steps} train metric: {train_metric}")
@@ -872,54 +647,23 @@ def trainer(cfg: DictConfig):
                         is_regression=is_regression,
                         return_predictions=False,
                         flash_attention=flash_attention,
-                        metrics_dict=eval_metrics_dict,
-                        analysistraining=analysistraining,
-                        num_labels=num_labels,
-                        training_step=completed_steps,
                     )["eval_metric"]
                     results["accuracy_mm"] = mm_eval_metric["accuracy"]
 
                     res_mm = results["accuracy_mm"]
                     logger.info(f"step {completed_steps} eval metric mismatched: {res_mm}")
 
-                # #here they are not total losses
-                # if cfg.model.use_mop_loss:
-                #     metrics_dict.update({
-                #         "task_loss": task_loss,
-                #         "expert_loss":expert_loss,
-                #         "load_balancing_loss": load_balancing_loss,
-                #         "cost_based_loss_alpha": cost_based_loss_alpha,
-                #     })
-                
-            
-                eval_metrics_dict.update({
+                accelerator.log(
+                    {
                         "eval_metric": eval_metric if cfg.task != "mnli" else results,
                         "train_metric": train_metric,
                         "train_loss": total_loss / completed_steps,
                         "epoch": epoch,
                         "step": completed_steps,
                         "learning_rate": optimizer.param_groups[0]["lr"],
-                        "train/grad_norm": grad_norm_per_param,
-
-                    })
-                
-                accelerator.log(eval_metrics_dict, step=completed_steps)
-
-                # accelerator.log(
-                #     {
-                #         "eval_metric": eval_metric if cfg.task != "mnli" else results,
-                #         "train_metric": train_metric,
-                #         "train_loss": total_loss / completed_steps,
-                #         "task_loss": task_loss/ completed_steps,
-                #         "expert_loss":expert_loss/ completed_steps,
-                #         "load_balancing_loss": load_balancing_loss / completed_steps,
-                #         "epoch": epoch,
-                #         "step": completed_steps,
-                #         "learning_rate": optimizer.param_groups[0]["lr"],
-                #         "train/grad_norm": grad_norm_per_param,
-                #     },
-                #     step=completed_steps,
-                # )
+                    },
+                    step=completed_steps,
+                )
 
                 all_results = {f"eval_{k}": v for k, v in eval_metric.items()}
                 if cfg.task == "mnli":
