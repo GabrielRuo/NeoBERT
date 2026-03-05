@@ -1,0 +1,60 @@
+defaults:
+  - dataset: glue
+  - tokenizer: google_mini
+  - model: 
+    - neobert
+    - 120M
+  - optimizer: adamw
+  - trainer: glue
+  - scheduler: glue
+  - dataloader: base
+  - datacollator: base
+  - _self_
+
+seed: 0
+
+meta_task: glue
+task: mnli
+id: neobert_1000000_mnli_8_1e-5_0
+mode: train # eval, inference
+flash_attention: False # because does not run on the hardware I use
+
+hydra:
+  run:
+    dir: logs/hydra
+
+wandb:
+  name: neobert-mnli
+  project: MoP
+  entity: gabriel-ruault-centralesup-lec
+  tags: ["finetuning"]
+  dir: null
+  mode: online
+  resume: True
+  log_interval: 100
+
+model:
+  name: neobert
+  random_init_model: false
+  from_hub: false
+  classifier_init_range: 0.02
+  classifier_dropout: 0.1
+  # pretrained_config_path: ${oc.env:SCRATCH}/logs/neobert/hydra/.hydra/config.yaml
+  pretrained_checkpoint_dir: '/runs/logs/checkpoints/hetero_moe_2025-10-07_14-46-36/'
+  pretrained_checkpoint: '10000'
+  num_checkpoints_to_merge: 1
+  transfer_from_task: false
+  matching_task:
+    mnli: snli
+    wnli: mnli
+    qnli: mnli
+  use_mop_loss: true
+  loss:
+    cost_based_loss_alpha_end: 4e-8
+    cost_based_loss_epsilon: 1e-5
+    denominator_exponent: 1
+    load_balancing_loss_coeff: 1e-2 #https://arxiv.org/pdf/2403.07652
+    disable_task_performance_scaling: False
+
+  
+

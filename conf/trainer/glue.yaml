@@ -9,7 +9,7 @@ num_train_epochs: 10
 early_stopping: -1
 eval_steps: 1000
 resume_from_checkpoint: False
-checkpoint_dir: null
+checkpoint_dir: /runs/logs/checkpoints
 max_ckpt: 1
 smart: False
 smart_weight: 0.02

@@ -23,7 +23,7 @@ wandb:
   resume: never
   name: null
   project: MoP
-  entity: g-ruault-centralesup-lec
+  entity: gabriel-ruault-centralesup-lec
   tags: []
   dir: logs/wandb
   mode: online

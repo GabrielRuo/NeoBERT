@@ -4,7 +4,7 @@ import torch
 from omegaconf import OmegaConf
 from ..model import NeoBERTLMHead, NeoBERTConfig
 from ..tokenizer import get_tokenizer
-from ..pretraining.analysis import get_normalised_expert_usage_cost_per_sequence,get_entropy,get_mse_per_sequence
+from ..Analysis.analysis import get_normalised_expert_usage_cost_per_sequence,get_entropy,get_mse_per_sequence
 
 from ..dataset import get_dataset
 from ..dataloader import get_dataloader
@@ -56,8 +56,19 @@ def compute_correlations(base_path,checkpoint):
         i += 1
         if i >= 500:
             break
-        model_output = model(batch["input_ids"], batch.get("attention_mask", None), output_expert_usage_loss=True, output_router_logits=True)
-        normalised_expert_usage_cost_per_seq = get_normalised_expert_usage_cost_per_sequence(model_output['router_logits'], batch.get("attention_mask", None), cfg)
+        # Ensure attention_mask is bool if present
+        attention_mask = batch.get("attention_mask", None)
+        if attention_mask is not None:
+            attention_mask = attention_mask.bool()
+        model_output = model(
+            batch["input_ids"],
+            attention_mask,
+            output_expert_usage_loss=True,
+            output_router_logits=True
+        )
+        normalised_expert_usage_cost_per_seq = get_normalised_expert_usage_cost_per_sequence(
+            model_output['router_logits'], attention_mask, cfg
+        )
         mse_loss_per_seq = get_mse_per_sequence(model_output['logits'], cfg, batch)
 
         # Convert to numpy arrays and flatten if needed
@@ -90,8 +101,8 @@ def compute_correlations_across_list_of_models(list_of_base_paths = [
         correlations.append(correl)
     print(f"All correlations: {correlations}")
 
-    
-    
+
+
 
 
 

@@ -25,9 +25,14 @@ wandb:
   project: MoP
   entity: gabriel-ruault-centralesup-lec
   tags: []
-  dir: logs/wandb
+  dir: logs/wandb #unused and overwritten by trainer log dir
   mode: online
   log_interval: 100
+
+test:
+  max_steps: 10 #1000
+  buffer_size_seq: 100 #10000
+  buffer_size_token: 100 #10000
 
 
 

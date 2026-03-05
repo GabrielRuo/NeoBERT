@@ -1,5 +1,5 @@
 tf32: True
-mixed_precision: fp16
+mixed_precision: bf16 #if using A10 and above use bf16 if using T4, fp16
 resume: True
 disable_tqdm: False
 max_steps: 1000000
@@ -11,5 +11,5 @@ accelerate:
 model:
   save_steps: 10000
   max_ckpt: 1000
-dir: /runs/logs/checkpoints
+dir: /neobert/runs/logs"
 save_model: False

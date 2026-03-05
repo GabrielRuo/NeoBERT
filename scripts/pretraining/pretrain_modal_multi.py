@@ -35,10 +35,11 @@ def get_arg_value(key, cli_arguments):
 # alpha_scaling_list = [0.0,1.0,5.0]
 # schedule_list = [2500000]
 # cost_exponent_list = [2]
-
-alpha_start_list = [5e-10]
-alpha_end_list = [4e-8,7e-8,2e-7,4e-7,6e-7,8e-7,1e-6,5e-6,1e-5]
-alpha_scaling_list = [0.0,1.0,5.0,10.0]
+import numpy as np
+alpha_start_list = [1e-10]#[5e-10]
+alpha_end_list = list(np.array([4e-7,6e-7,8e-7,1.3e-6,1.6e-6,3e-6]))
+#alpha_end_list = list(np.array([0.0,5e-9,8e-9,2e-8,4e-8,7e-8,9e-8,2e-7,4e-7,6e-7,8e-7,1e-6,5e-6,1e-5])/5)
+alpha_scaling_list = [0.0]
 schedule_list = [2500000]
 cost_exponent_list = [2]
 
