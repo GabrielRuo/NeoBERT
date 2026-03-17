@@ -1,0 +1,39 @@
+services:
+  modal-like:
+    image: neobert-dev:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: neobert_modal_local
+    # Bind-mount conf and src to mirror Modal behavior; host runs/data/cache act like Modal volumes
+    volumes:
+      - ./conf:/workspace/conf:rw
+      - ./src:/workspace/src:rw
+      - ./scripts:/workspace/scripts:rw
+      - ./tests:/workspace/tests:ro
+      - ./.env:/workspace/.env:rw
+      - ./runs:/runs:rw
+      - ./data:/data:rw
+      - ./cache/hf:/cache/hf:rw
+      - ~/.cache/pip:/root/.cache/pip:rw
+    env_file: # directly inject environment variables from .env, which is gitignored and should contain actual credentials
+      - .env
+    environment:
+      TRANSFORMERS_OFFLINE: "0"
+      HF_HUB_OFFLINE: "0"
+      HF_DATASETS_OFFLINE: "0"
+      WANDB_MODE: "offline"
+      HF_TOKEN: ""
+      WANDB_API_KEY: ""
+      HF_HOME: "/cache/hf"
+      TRANSFORMERS_CACHE: "/cache/hf"
+      # convenience override for trainer default path
+      TRAINER_CHECKPOINT_DIR: "/runs/checkpoints"
+    stdin_open: true
+    tty: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+volumes:
+  runs:
+  data:
+  cache_hf:
