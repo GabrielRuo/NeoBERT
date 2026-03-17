@@ -8,26 +8,26 @@ import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
-from torch.nn.functional import scaled_dot_product_attention,softmax
+from torch.nn.functional import scaled_dot_product_attention, softmax
 
-from typing import Any, Dict, List, Optional,Union
+from typing import Any, Dict, List, Optional, Union
 from functools import partial
 
 import logging
+
 logger = logging.getLogger(__name__)
-
-#ONLY for testing on cpu reasons
-import torch._dynamo
-torch._dynamo.config.suppress_errors = True
-
-#If using GPUs not CPU
-# from xformers.ops import SwiGLU, memory_efficient_attention  #DOES NOT WORK ON A NODE WITH NO GPU
 
 from datasets import Dataset
 
-from transformers import PreTrainedModel, PretrainedConfig, PreTrainedTokenizerFast, DataCollatorWithPadding
+from transformers import (
+    PreTrainedModel,
+    PretrainedConfig,
+    PreTrainedTokenizerFast,
+    DataCollatorWithPadding,
+)
 from transformers.modeling_outputs import SequenceClassifierOutput
 
 from tqdm import tqdm
@@ -35,8 +35,7 @@ from tqdm import tqdm
 from .rmsnorm import RMSNorm
 from .rotary import precompute_freqs_cis, apply_rotary_emb
 
-# #FOR TESTING WITH NO GPU!
-import torch.nn.functional as F
+
 class SwiGLU(nn.Module):
     def __init__(self, in_dim: int, hidden_dim: int, out_dim: int, bias: bool = True):
         super().__init__()
@@ -47,6 +46,7 @@ class SwiGLU(nn.Module):
         x_proj = self.in_proj(x)
         x1, x2 = x_proj.chunk(2, dim=-1)
         return self.out_proj(F.silu(x1) * x2)
+
 
 class NeoBERTConfig(PretrainedConfig):
     model_type = "neobert"
@@ -68,19 +68,18 @@ class NeoBERTConfig(PretrainedConfig):
         vocab_size: int = 32768,
         pad_token_id: int = 0,
         max_length: int = 1024,
-        flash_attention: bool = False,  # SWITCH TO TRUE if using xformers
         base_scale: float = 1.0 / (960.0**0.5),
         ngpt: bool = False,
         dropout_prob: float = 0.0,
-        #added attributes
-        router_jitter_noise = 1e-5,
-        routing_strategy = "top_k",
-        num_experts_per_tok_training = 8,
-        num_experts_per_tok_inference = 2,
-        min_expert_cumprob_per_token = 0.4,
-        dropout_max_prob = None,
-        dropout_router_weight_threshold = None,
-        expert_cost_exponent = 2,
+        # added attributes
+        router_jitter_noise=1e-5,
+        routing_strategy="top_k",
+        num_experts_per_tok_training=8,
+        num_experts_per_tok_inference=2,
+        min_expert_cumprob_per_token=0.4,
+        dropout_max_prob=None,
+        dropout_router_weight_threshold=None,
+        expert_cost_exponent=2,
         expert_sizes="0,1536,3072",
         apply_expert_dropout: bool = False,
         **kwargs,
@@ -104,14 +103,13 @@ class NeoBERTConfig(PretrainedConfig):
         self.vocab_size = vocab_size
         self.pad_token_id = pad_token_id
         self.max_length = max_length
-        self.flash_attention = flash_attention
         self.base_scale = base_scale
         self.ngpt = ngpt
         self.dropout_prob = dropout_prob
-        #Added modules
+        # Added modules
         self.router_jitter_noise = router_jitter_noise
         self.routing_strategy = routing_strategy
-        self.num_experts_per_tok_training = num_experts_per_tok_training 
+        self.num_experts_per_tok_training = num_experts_per_tok_training
         self.num_experts_per_tok_inference = num_experts_per_tok_inference
         self.min_expert_cumprob_per_token = min_expert_cumprob_per_token
         self.dropout_max_prob = dropout_max_prob
@@ -122,29 +120,37 @@ class NeoBERTConfig(PretrainedConfig):
         self.kwargs = kwargs
 
 
-
 class Expert(nn.Module):
-# ATTENTION A LA CONFIG QUI DOIT ETRE NEOBERTCONFIG
+    # ATTENTION A LA CONFIG QUI DOIT ETRE NEOBERTCONFIG
     """An FFN -based module that processes the input and returns an output."""
-    def __init__(self, config: NeoBERTConfig, expert_size: int,) -> None:
-        """
-    Initialize an expert. An expert is a FFN-based module that processes the input
-    and returns an output. Architecture based on Mixtral
 
-    :param: config: The configuration for the model.
-    :param: expert_size The dimension of the hidden layer of the FFN.
-    """
+    def __init__(
+        self,
+        config: NeoBERTConfig,
+        expert_size: int,
+    ) -> None:
+        """
+        Initialize an expert. An expert is a FFN-based module that processes the input
+        and returns an output. Architecture based on Mixtral
+
+        :param: config: The configuration for the model.
+        :param: expert_size The dimension of the hidden layer of the FFN.
+        """
         super().__init__()
         self.identity = expert_size == 0
 
         if not self.identity:
-            #NOT SURE ABOUT THIS PART
+            # NOT SURE ABOUT THIS PART
             expert_size = int(2 * expert_size / 3)
-            expert_size = expert_size - (expert_size % 8)  # Make sure the size is a multiple of 8
-            self.ffn = SwiGLU(config.hidden_size, expert_size, config.hidden_size, bias=False)
+            expert_size = expert_size - (
+                expert_size % 8
+            )  # Make sure the size is a multiple of 8
+            self.ffn = SwiGLU(
+                config.hidden_size, expert_size, config.hidden_size, bias=False
+            )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-#ATTENTION AU SELF.IDENTITY
+        # ATTENTION AU SELF.IDENTITY
         if self.identity:
             return x
         x = self.ffn(x)
@@ -172,9 +178,11 @@ class MoEBlock(nn.Module):
         super().__init__()
 
         self.config = config
-        self.expert_dims = [int(expert_size) for expert_size in config.expert_sizes.split(",")]
+        self.expert_dims = [
+            int(expert_size) for expert_size in config.expert_sizes.split(",")
+        ]
         self.num_experts = len(self.expert_dims)
-        
+
         self.routing_strategy = config.routing_strategy
 
         self.gate = nn.Linear(config.hidden_size, self.num_experts, bias=False)
@@ -184,15 +192,14 @@ class MoEBlock(nn.Module):
         )
         self.jitter_noise = config.router_jitter_noise
 
-    #@torch.autocast(device_type="cuda", dtype=torch.float32) #probably useless given we use autocast in training loop
-
+    # @torch.autocast(device_type="cuda", dtype=torch.float32) #probably useless given we use autocast in training loop
 
     def forward(
         self,
         hidden_states: torch.Tensor,
         output_expert_usage_loss: bool,
         pad_mask: torch.Tensor,
-        #task_ids: torch.Tensor,
+        # task_ids: torch.Tensor,
         *,
         inference: bool = False,
         inference_dropout_threshold: float | None = None,
@@ -212,10 +219,12 @@ class MoEBlock(nn.Module):
             indices of the experts to activate, and the mean expert usage loss.
 
         """
-        #add jitter
+        # add jitter
         hidden_states_shape = hidden_states.shape
         if self.training and self.jitter_noise > 0:
-            hidden_states *= torch.empty_like(hidden_states).uniform_(1.0 - self.jitter_noise, 1.0 + self.jitter_noise)
+            hidden_states *= torch.empty_like(hidden_states).uniform_(
+                1.0 - self.jitter_noise, 1.0 + self.jitter_noise
+            )
         hidden_states = hidden_states.view(-1, hidden_states_shape[-1])
 
         # router_logits: (batch * sequence_length, n_experts)
@@ -223,53 +232,64 @@ class MoEBlock(nn.Module):
         routing_weights = softmax(router_logits, dim=1, dtype=torch.float)
         raw_routing_weights = routing_weights.clone()
 
-        #compute expert usage loss 
-        if output_expert_usage_loss: 
-            mean_expert_usage_loss = self._MoEBlockRoutingCost(raw_routing_weights, pad_mask)
+        # compute expert usage loss
+        if output_expert_usage_loss:
+            mean_expert_usage_loss = self._MoEBlockRoutingCost(
+                raw_routing_weights, pad_mask
+            )
 
-        #if training, apply expert dropout and update routing weights
+        # if training, apply expert dropout and update routing weights
         if self.training and self.config.apply_expert_dropout:
-            routing_weights = self._RoutingWeightsWithExpertDropout(router_logits,routing_weights)
-        
+            routing_weights = self._RoutingWeightsWithExpertDropout(
+                router_logits, routing_weights
+            )
+
         if self.routing_strategy == "top_k":
-        #Perform top k routing
+            # Perform top k routing
 
             if self.training:
                 top_k = self.config.num_experts_per_tok_training
-            else: 
+            else:
                 top_k = self.config.num_experts_per_tok_inference
-            
-            final_hidden_states = self._top_k_routing(hidden_states, hidden_states_shape, routing_weights,top_k)
-        
+
+            final_hidden_states = self._top_k_routing(
+                hidden_states, hidden_states_shape, routing_weights, top_k
+            )
+
         elif self.routing_strategy == "top_p":
             top_p = self.config.min_expert_cumprob_per_token
-            final_hidden_states = self._top_p_routing(hidden_states, hidden_states_shape, routing_weights,top_p)
+            final_hidden_states = self._top_p_routing(
+                hidden_states, hidden_states_shape, routing_weights, top_p
+            )
 
-        output = (final_hidden_states,router_logits,)
+        output = (
+            final_hidden_states,
+            router_logits,
+        )
         if output_expert_usage_loss:
             output += (mean_expert_usage_loss,)
 
-        return output #will probably stop outputing raw_routing_weights in future
-
+        return output  # will probably stop outputing raw_routing_weights in future
 
     def _RoutingWeightsWithExpertDropout(self, router_logits, routing_weights):
 
-        if (self.config.dropout_max_prob is not None
-                and self.config.dropout_router_weight_threshold is not None
+        if (
+            self.config.dropout_max_prob is not None
+            and self.config.dropout_router_weight_threshold is not None
         ):
 
             mask = (routing_weights < self.config.dropout_router_weight_threshold) & (
-                    torch.rand_like(routing_weights)
-                    < (
+                torch.rand_like(routing_weights)
+                < (
+                    self.config.dropout_max_prob
+                    - (
                         self.config.dropout_max_prob
-                        - (
-                            self.config.dropout_max_prob
-                            / self.config.dropout_router_weight_threshold
-                        )
-                        * routing_weights
+                        / self.config.dropout_router_weight_threshold
                     )
+                    * routing_weights
                 )
-        
+            )
+
             router_logits = torch.where(mask, float("-inf"), router_logits)
             routing_weights = softmax(router_logits, dim=-1)
 
@@ -279,119 +299,143 @@ class MoEBlock(nn.Module):
                 "`dropout_router_weight_threshold` not set. "
                 "Skipping expert dropout."
             )
-    
+
         return routing_weights
-    
-    def _MoEBlockRoutingCost(self,raw_routing_weights, pad_mask):
+
+    def _MoEBlockRoutingCost(self, raw_routing_weights, pad_mask):
 
         if len(self.expert_dims) > 1:
 
-            expert_dims_tensor = torch.tensor(self.expert_dims,dtype=torch.float32,
-                device=raw_routing_weights.device )
+            expert_dims_tensor = torch.tensor(
+                self.expert_dims, dtype=torch.float32, device=raw_routing_weights.device
+            )
             normalisation_factor = torch.sum(expert_dims_tensor)
-            normalised_expert_sizes = expert_dims_tensor / normalisation_factor#prevent overflow
+            normalised_expert_sizes = (
+                expert_dims_tensor / normalisation_factor
+            )  # prevent overflow
             routing_costs = normalised_expert_sizes**self.config.expert_cost_exponent
-            routing_costs = routing_costs.to(dtype = raw_routing_weights.dtype)#cast back to original dtype
+            routing_costs = routing_costs.to(
+                dtype=raw_routing_weights.dtype
+            )  # cast back to original dtype
 
-            #ignore padding_tokens
-            if pad_mask!= None: #pad_mask has shape (Batch, Heads, Length, Length) and routing_weights has shape (batch * sequence_length, n_experts)
-                boolean_pad_mask = pad_mask[:,0,0,:].reshape(-1)
+            # ignore padding_tokens
+            if (
+                pad_mask != None
+            ):  # pad_mask has shape (Batch, Heads, Length, Length) and routing_weights has shape (batch * sequence_length, n_experts)
+                boolean_pad_mask = pad_mask[:, 0, 0, :].reshape(-1)
                 boolean_pad_mask = (boolean_pad_mask != float("-inf")).squeeze(-1)
-                raw_routing_weights = raw_routing_weights[boolean_pad_mask,:] #quite compute expensive to reshape tensors
+                raw_routing_weights = raw_routing_weights[
+                    boolean_pad_mask, :
+                ]  # quite compute expensive to reshape tensors
 
                 # boolean_pad_mask =  torch.where(pad_mask[:, 0, 0, :]==float(0.0),1,0).type(raw_routing_weights.dtype) #we have an additive padding mask which we convert
                 # # shape (batch, heads, seq_len, seq_len) --> (batch, seq_len)
                 # raw_routing_weights = raw_routing_weights * boolean_pad_mask.view(-1,1)
 
             # Compute usage loss per token: (batch_size * seq_len)
-            expert_usage_loss = torch.einsum('ik,k->i', raw_routing_weights, routing_costs)
+            expert_usage_loss = torch.einsum(
+                "ik,k->i", raw_routing_weights, routing_costs
+            )
 
             # Average over all tokens in the batch
             mean_expert_usage_loss = expert_usage_loss.mean()
         else:
             mean_expert_usage_loss = None
         return mean_expert_usage_loss
-    
-    def _top_k_routing(self, hidden_states,hidden_states_shape,routing_weights,top_k):
 
-            batch_size, sequence_length,hidden_dim = hidden_states_shape
+    def _top_k_routing(
+        self, hidden_states, hidden_states_shape, routing_weights, top_k
+    ):
 
-            routing_weights, selected_experts = torch.topk(routing_weights, top_k, dim=-1)
-            routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
-            # we cast back to the input dtype
-            routing_weights = routing_weights.to(hidden_states.dtype)
-            
-            final_hidden_states = torch.zeros(
-                (batch_size * sequence_length, hidden_dim), dtype=hidden_states.dtype, device=hidden_states.device
+        batch_size, sequence_length, hidden_dim = hidden_states_shape
+
+        routing_weights, selected_experts = torch.topk(routing_weights, top_k, dim=-1)
+        routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
+        # we cast back to the input dtype
+        routing_weights = routing_weights.to(hidden_states.dtype)
+
+        final_hidden_states = torch.zeros(
+            (batch_size * sequence_length, hidden_dim),
+            dtype=hidden_states.dtype,
+            device=hidden_states.device,
+        )
+
+        # One hot encode the selected experts to create an expert mask
+        # this will be used to easily index which expert is going to be sollicitated
+        expert_mask = torch.nn.functional.one_hot(
+            selected_experts, num_classes=self.num_experts
+        ).permute(2, 1, 0)
+
+        expert_hitted = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
+        for expert_idx in expert_hitted:
+            expert_layer = self.experts[expert_idx]
+            idx, top_x = torch.where(expert_mask[expert_idx].squeeze(0))
+            # Index the correct hidden states and compute the expert hidden state for
+            # the current expert. We need to make sure to multiply the output hidden
+            # states by `routing_weights` on the corresponding tokens (top-1 and top-2)
+            current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
+            current_hidden_states = (
+                expert_layer(current_state) * routing_weights[top_x, idx, None]
             )
 
-            # One hot encode the selected experts to create an expert mask
-            # this will be used to easily index which expert is going to be sollicitated
-            expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes=self.num_experts).permute(2, 1, 0)
+            # However `index_add_`only support torch tensors for indexing so we'll use
+            # the `top_x` tensor here.
+            final_hidden_states.index_add_(
+                0, top_x, current_hidden_states.to(hidden_states.dtype)
+            )
+        final_hidden_states = final_hidden_states.reshape(
+            batch_size, sequence_length, hidden_dim
+        )
+        return final_hidden_states
 
-            expert_hitted = torch.greater(expert_mask.sum(dim=(-1, -2)), 0).nonzero()
-            for expert_idx in expert_hitted:
-                expert_layer = self.experts[expert_idx]
-                idx, top_x = torch.where(expert_mask[expert_idx].squeeze(0))
-                # Index the correct hidden states and compute the expert hidden state for
-                # the current expert. We need to make sure to multiply the output hidden
-                # states by `routing_weights` on the corresponding tokens (top-1 and top-2)
-                current_state = hidden_states[None, top_x].reshape(-1, hidden_dim)
-                current_hidden_states = expert_layer(current_state) * routing_weights[top_x, idx, None]
-
-                # However `index_add_`only support torch tensors for indexing so we'll use
-                # the `top_x` tensor here.
-                final_hidden_states.index_add_(0, top_x, current_hidden_states.to(hidden_states.dtype))
-            final_hidden_states = final_hidden_states.reshape(batch_size, sequence_length, hidden_dim)
-            return final_hidden_states
-    
-
-    
-    def _top_p_routing(self, hidden_states, hidden_states_shape, routing_weights, top_p):
+    def _top_p_routing(
+        self, hidden_states, hidden_states_shape, routing_weights, top_p
+    ):
         batch_size, sequence_length, hidden_dim = hidden_states_shape
-        sorted_weights, sorted_indices = torch.sort(routing_weights, dim=-1, descending=False)
-        
+        sorted_weights, sorted_indices = torch.sort(
+            routing_weights, dim=-1, descending=False
+        )
+
         cum_probs = sorted_weights.cumsum(dim=-1)
         mask = cum_probs > 1 - top_p
 
         # Revert to original order
         unsorted_mask = torch.zeros_like(mask, dtype=torch.bool)
-        expert_mask = unsorted_mask.scatter(dim=-1, index=sorted_indices, src=mask).permute(1, 0)  # shape: (num_experts, tokens)
-    
+        expert_mask = unsorted_mask.scatter(
+            dim=-1, index=sorted_indices, src=mask
+        ).permute(
+            1, 0
+        )  # shape: (num_experts, tokens)
+
         # Start building the final output
         final_hidden_states = torch.zeros_like(hidden_states)
         expert_hitted = torch.greater(expert_mask.sum(dim=(-1)), 0).nonzero()
         # Route tokens to experts
         for expert_idx in expert_hitted:
-            token_idx = torch.where(expert_mask[expert_idx.squeeze(0)])[0]  # which tokens go to this expert
-            
+            token_idx = torch.where(expert_mask[expert_idx.squeeze(0)])[
+                0
+            ]  # which tokens go to this expert
+
             expert_layer = self.experts[expert_idx]
             current_states = hidden_states[token_idx]
 
             # Get and normalize the routing weights for this expert & selected tokens: although no normalising  mentioned in the paper
             selected_tokens_weights = routing_weights[token_idx, expert_idx]
-            total_weights = (routing_weights * expert_mask.permute(1,0)).sum(dim=1) 
+            total_weights = (routing_weights * expert_mask.permute(1, 0)).sum(dim=1)
             selected_tokens_total_weights = total_weights[token_idx]
             selected_tokens_weights /= selected_tokens_total_weights + 1e-9
 
             # Apply expert
-            expert_output = expert_layer(current_states) * selected_tokens_weights[:, None]
+            expert_output = (
+                expert_layer(current_states) * selected_tokens_weights[:, None]
+            )
             # Aggregate
             final_hidden_states.index_add_(0, token_idx, expert_output)
-        final_hidden_states = final_hidden_states.reshape(batch_size, sequence_length, hidden_dim)
-            
+        final_hidden_states = final_hidden_states.reshape(
+            batch_size, sequence_length, hidden_dim
+        )
+
         return final_hidden_states
-
-
-
-
-
-
-
-
-
-
-
 
         # Step 4: Mask out non-selected weights, re-normalize
         masked_weights = sorted_weights * top_p_mask
@@ -406,7 +450,9 @@ class MoEBlock(nn.Module):
 
         # Step 6: Compute input to experts
         selected_hidden_states = hidden_states[token_idx]  # (num_selected, hidden_dim)
-        selected_weights = masked_weights[token_idx, expert_pos].unsqueeze(-1)  # (num_selected, 1)
+        selected_weights = masked_weights[token_idx, expert_pos].unsqueeze(
+            -1
+        )  # (num_selected, 1)
 
         # Step 7: Prepare output buffer
         final_hidden_states = torch.zeros_like(hidden_states)
@@ -421,10 +467,10 @@ class MoEBlock(nn.Module):
             scaled_output = expert_output * selected_weights[idx]  # (N, H)
             final_hidden_states.index_add_(0, token_idx[idx], scaled_output)
 
-        final_hidden_states = final_hidden_states.reshape(batch_size, sequence_length, hidden_dim)
+        final_hidden_states = final_hidden_states.reshape(
+            batch_size, sequence_length, hidden_dim
+        )
         return final_hidden_states
-
-    
 
 
 class EncoderBlock(nn.Module):
@@ -436,56 +482,91 @@ class EncoderBlock(nn.Module):
         self.config = config
 
         # Attention
-        self.qkv = nn.Linear(in_features=config.hidden_size, out_features=config.hidden_size * 3, bias=False)
-        self.wo = nn.Linear(in_features=config.hidden_size, out_features=config.hidden_size, bias=False)
+        self.qkv = nn.Linear(
+            in_features=config.hidden_size,
+            out_features=config.hidden_size * 3,
+            bias=False,
+        )
+        self.wo = nn.Linear(
+            in_features=config.hidden_size, out_features=config.hidden_size, bias=False
+        )
         self.resid_dropout = nn.Dropout(config.dropout)
 
         self.attention_norm = (
-            RMSNorm(config.hidden_size, config.norm_eps) if config.rms_norm else nn.LayerNorm(config.hidden_size, config.norm_eps)
+            RMSNorm(config.hidden_size, config.norm_eps)
+            if config.rms_norm
+            else nn.LayerNorm(config.hidden_size, config.norm_eps)
         )
         self.expert_norm = (
-            RMSNorm(config.hidden_size, config.norm_eps) if config.rms_norm else nn.LayerNorm(config.hidden_size, config.norm_eps)
+            RMSNorm(config.hidden_size, config.norm_eps)
+            if config.rms_norm
+            else nn.LayerNorm(config.hidden_size, config.norm_eps)
         )
         self.ffn_dropout = nn.Dropout(config.dropout)
 
+        self.block_moe = MoEBlock(config)
 
-        self.block_moe = MoEBlock(
-            config)
-
-    def forward(self, x: torch.Tensor, pad_mask: torch.Tensor, freqs_cis: torch.Tensor,output_expert_usage_loss: bool):
+    def forward(
+        self,
+        x: torch.Tensor,
+        pad_mask: torch.Tensor,
+        freqs_cis: torch.Tensor,
+        output_expert_usage_loss: bool,
+    ):
         x = x + self._att_block(self.attention_norm(x), pad_mask, freqs_cis)
 
-        moe_output = self.block_moe(self.expert_norm(x),output_expert_usage_loss,pad_mask)
+        moe_output = self.block_moe(
+            self.expert_norm(x), output_expert_usage_loss, pad_mask
+        )
 
-        x = x + self.ffn_dropout(moe_output[0]) 
+        x = x + self.ffn_dropout(moe_output[0])
 
-        return (x,*moe_output[1:],)
+        return (
+            x,
+            *moe_output[1:],
+        )
 
-    def _att_block(self, x: torch.Tensor, pad_mask: torch.Tensor, freqs_cis: torch.Tensor):
+    def _att_block(
+        self, x: torch.Tensor, pad_mask: torch.Tensor, freqs_cis: torch.Tensor
+    ):
         batch_size, seq_len, _ = x.shape
 
-        xq, xk, xv = self.qkv(x).view(batch_size, seq_len, self.config.num_attention_heads, self.config.dim_head * 3).chunk(3, axis=-1)
+        xq, xk, xv = (
+            self.qkv(x)
+            .view(
+                batch_size,
+                seq_len,
+                self.config.num_attention_heads,
+                self.config.dim_head * 3,
+            )
+            .chunk(3, axis=-1)
+        )
 
         # @torch._dynamo.disable
-        def _untraced_flash_attention(*args,**kwargs):
+        def _untraced_flash_attention(*args, **kwargs):
             return memory_efficient_attention(*args, **kwargs)
-         
+
         if self.config.rope:
             xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
 
-        if self.config.flash_attention:
-            attn = _untraced_flash_attention(query=xq, key=xk, value=xv, attn_bias=pad_mask, p=0)
-        else:
-            # Input and output are of dimension (B, H, M, K)
-            attn = scaled_dot_product_attention(
-                query=xq.transpose(1, 2),
-                key=xk.transpose(1, 2),
-                value=xv.transpose(1, 2),
-                attn_mask=pad_mask,
-                dropout_p=self.config.dropout_prob if self.training else 0,
-            ).transpose(1, 2)
+        # Input and output are of dimension (B, H, M, K)
+        attn = scaled_dot_product_attention(
+            query=xq.transpose(1, 2),
+            key=xk.transpose(1, 2),
+            value=xv.transpose(1, 2),
+            attn_mask=pad_mask,
+            dropout_p=self.config.dropout_prob if self.training else 0,
+        ).transpose(1, 2)
 
-        return self.resid_dropout(self.wo(attn.reshape(batch_size, seq_len, self.config.num_attention_heads * self.config.dim_head)))
+        return self.resid_dropout(
+            self.wo(
+                attn.reshape(
+                    batch_size,
+                    seq_len,
+                    self.config.num_attention_heads * self.config.dim_head,
+                )
+            )
+        )
 
 
 class NormEncoderBlock(nn.Module):
@@ -497,31 +578,49 @@ class NormEncoderBlock(nn.Module):
         self.config = config
 
         # Attention
-        self.qkv = nn.Linear(in_features=config.hidden_size, out_features=config.hidden_size * 3, bias=False)
-        self.wo = nn.Linear(in_features=config.hidden_size, out_features=config.hidden_size, bias=False)
+        self.qkv = nn.Linear(
+            in_features=config.hidden_size,
+            out_features=config.hidden_size * 3,
+            bias=False,
+        )
+        self.wo = nn.Linear(
+            in_features=config.hidden_size, out_features=config.hidden_size, bias=False
+        )
         self.resid_dropout = nn.Dropout(config.dropout)
 
-        self.c_fc = nn.Linear(config.hidden_size, 2 * config.intermediate_size, bias=False)
+        self.c_fc = nn.Linear(
+            config.hidden_size, 2 * config.intermediate_size, bias=False
+        )
         self.silu = nn.SiLU()
-        self.mlp_c_proj = nn.Linear(config.intermediate_size, config.hidden_size, bias=False)
+        self.mlp_c_proj = nn.Linear(
+            config.intermediate_size, config.hidden_size, bias=False
+        )
 
         self.ffn_dropout = nn.Dropout(config.dropout)
 
         self.attn_alpha_init_value = 0.05
         self.attn_alpha_init_scaling = config.base_scale
-        self.attn_alpha = torch.nn.Parameter(self.attn_alpha_init_scaling * torch.ones(config.hidden_size))
+        self.attn_alpha = torch.nn.Parameter(
+            self.attn_alpha_init_scaling * torch.ones(config.hidden_size)
+        )
 
         self.mlp_alpha_init_value = 0.05
         self.mlp_alpha_init_scaling = config.base_scale
-        self.mlp_alpha = torch.nn.Parameter(self.mlp_alpha_init_scaling * torch.ones(config.hidden_size))
+        self.mlp_alpha = torch.nn.Parameter(
+            self.mlp_alpha_init_scaling * torch.ones(config.hidden_size)
+        )
 
         self.sqk_init_value = 1.0
         self.sqk_init_scaling = config.base_scale
-        self.sqk = torch.nn.Parameter(self.sqk_init_scaling * torch.ones(config.hidden_size))
+        self.sqk = torch.nn.Parameter(
+            self.sqk_init_scaling * torch.ones(config.hidden_size)
+        )
 
         self.suv_init_value = 1.0
         self.suv_init_scaling = 1.0
-        self.suv = torch.nn.Parameter(self.suv_init_scaling * torch.ones(2 * config.intermediate_size))
+        self.suv = torch.nn.Parameter(
+            self.suv_init_scaling * torch.ones(2 * config.intermediate_size)
+        )
 
     def justnorm(self, x):
         res = x / x.norm(p=2, dim=-1, keepdim=True)
@@ -530,7 +629,9 @@ class NormEncoderBlock(nn.Module):
     def forward(self, x: torch.Tensor, pad_mask: torch.Tensor, freqs_cis: torch.Tensor):
         x_attn = self._att_block(x, pad_mask, freqs_cis)
 
-        lr = self.attn_alpha * (self.attn_alpha_init_value / self.attn_alpha_init_scaling)
+        lr = self.attn_alpha * (
+            self.attn_alpha_init_value / self.attn_alpha_init_scaling
+        )
         lr = torch.abs(lr)
 
         A_norm = self.justnorm(x)
@@ -548,24 +649,42 @@ class NormEncoderBlock(nn.Module):
 
         return x
 
-    def _att_block(self, x: torch.Tensor, pad_mask: torch.Tensor, freqs_cis: torch.Tensor):
+    def _att_block(
+        self, x: torch.Tensor, pad_mask: torch.Tensor, freqs_cis: torch.Tensor
+    ):
         batch_size, seq_len, _ = x.shape
 
-        xq, xk, xv = self.qkv(x).view(batch_size, seq_len, self.config.num_attention_heads, self.config.dim_head * 3).chunk(3, axis=-1)
+        xq, xk, xv = (
+            self.qkv(x)
+            .view(
+                batch_size,
+                seq_len,
+                self.config.num_attention_heads,
+                self.config.dim_head * 3,
+            )
+            .chunk(3, axis=-1)
+        )
 
         if self.config.rope:
             xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
 
         sqk = (self.sqk * (self.sqk_init_value / self.sqk_init_scaling)).view(
-            1, 1, self.config.num_attention_heads, self.config.hidden_size // self.config.num_attention_heads
+            1,
+            1,
+            self.config.num_attention_heads,
+            self.config.hidden_size // self.config.num_attention_heads,
         )
         xq = sqk * self.justnorm(xq)
         xk = sqk * self.justnorm(xk)
 
-        softmax_scale = (self.config.hidden_size / self.config.num_attention_heads) ** 0.5
+        softmax_scale = (
+            self.config.hidden_size / self.config.num_attention_heads
+        ) ** 0.5
 
         if self.config.flash_attention:
-            attn = memory_efficient_attention(query=xq, key=xk, value=xv, attn_bias=pad_mask, p=0, scale=softmax_scale)
+            attn = memory_efficient_attention(
+                query=xq, key=xk, value=xv, attn_bias=pad_mask, p=0, scale=softmax_scale
+            )
         else:
             # Input and output are of dimension (B, H, M, K)
             attn = scaled_dot_product_attention(
@@ -577,11 +696,16 @@ class NormEncoderBlock(nn.Module):
                 scale=softmax_scale,
             ).transpose(1, 2)
 
-        return self.resid_dropout(self.wo(attn.reshape(batch_size, seq_len, self.config.hidden_size)))
+        return self.resid_dropout(
+            self.wo(attn.reshape(batch_size, seq_len, self.config.hidden_size))
+        )
 
     def _ff_block(self, x: torch.Tensor):
         uv = self.c_fc(x)
-        suv = self.suv * ((self.suv_init_value / self.suv_init_scaling) * (self.config.hidden_size**0.5))
+        suv = self.suv * (
+            (self.suv_init_value / self.suv_init_scaling)
+            * (self.config.hidden_size**0.5)
+        )
         uv = suv * uv
 
         u, v = torch.chunk(uv, 2, dim=-1)
@@ -597,11 +721,15 @@ class NeoBERTPreTrainedModel(PreTrainedModel):
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
-            module.weight.data.uniform_(-self.config.decoder_init_range, self.config.decoder_init_range)
+            module.weight.data.uniform_(
+                -self.config.decoder_init_range, self.config.decoder_init_range
+            )
             if module.bias is not None:
                 module.bias.data.zero_()
         elif isinstance(module, nn.Embedding):
-            module.weight.data.uniform_(-self.config.embedding_init_range, self.config.embedding_init_range)
+            module.weight.data.uniform_(
+                -self.config.embedding_init_range, self.config.embedding_init_range
+            )
 
 
 class NeoBERT(NeoBERTPreTrainedModel):
@@ -612,32 +740,58 @@ class NeoBERT(NeoBERTPreTrainedModel):
 
         self.config = config
 
-        self.encoder = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
+        self.encoder = nn.Embedding(
+            config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id
+        )
 
         if self.config.rope:
-            self.freqs_cis = precompute_freqs_cis(config.hidden_size // config.num_attention_heads, config.max_length)
+            self.freqs_cis = precompute_freqs_cis(
+                config.hidden_size // config.num_attention_heads, config.max_length
+            )
         else:
-            self.positional_embedding = nn.Embedding(config.max_length + 1, config.hidden_size, padding_idx=config.pad_token_id)
+            self.positional_embedding = nn.Embedding(
+                config.max_length + 1,
+                config.hidden_size,
+                padding_idx=config.pad_token_id,
+            )
 
         self.transformer_encoder = nn.ModuleList()
         for _ in range(config.num_hidden_layers):
             self.transformer_encoder.append(EncoderBlock(config))
 
         self.layer_norm = (
-            RMSNorm(config.hidden_size, config.norm_eps) if config.rms_norm else nn.LayerNorm(config.hidden_size, config.norm_eps)
+            RMSNorm(config.hidden_size, config.norm_eps)
+            if config.rms_norm
+            else nn.LayerNorm(config.hidden_size, config.norm_eps)
         )
 
         # Initialize weights and apply final processing
         self.post_init()
 
-    def forward(self, src, pad_mask=None, output_expert_usage_loss: bool = False, output_router_logits: bool = False):
-    
+    def forward(
+        self,
+        src,
+        pad_mask=None,
+        output_expert_usage_loss: bool = False,
+        output_router_logits: bool = False,
+    ):
+
         # Expand and repeat: (Batch, Length) -> (Batch, Heads, Length, Length)
         if pad_mask is not None:
-            assert pad_mask.dtype != torch.bool, "NeoBERT expects an additive pad_mask (not bool)"
-            if torch.any(pad_mask == 1.0): #changed code to not break computational graph
-                raise ValueError("NeoBERT expects an additive pad_mask (no 1.0 values allowed)")
-            pad_mask = pad_mask.unsqueeze(1).unsqueeze(1).repeat(1, self.config.num_attention_heads, pad_mask.size(-1), 1)
+            assert (
+                pad_mask.dtype != torch.bool
+            ), "NeoBERT expects an additive pad_mask (not bool)"
+            if torch.any(
+                pad_mask == 1.0
+            ):  # changed code to not break computational graph
+                raise ValueError(
+                    "NeoBERT expects an additive pad_mask (no 1.0 values allowed)"
+                )
+            pad_mask = (
+                pad_mask.unsqueeze(1)
+                .unsqueeze(1)
+                .repeat(1, self.config.num_attention_heads, pad_mask.size(-1), 1)
+            )
 
         # RoPE
         freqs_cis = None
@@ -654,7 +808,7 @@ class NeoBERT(NeoBERTPreTrainedModel):
             incremental_indices = (torch.cumsum(mask, dim=1).type_as(mask)) * mask  #
             incremental_indices = incremental_indices.long() + self.config.pad_token_id
             x += self.positional_embedding(incremental_indices)
-        
+
         if output_expert_usage_loss:
             total_mean_expert_usage_loss = torch.tensor(0.0, device=src.device)
         if output_router_logits:
@@ -662,28 +816,30 @@ class NeoBERT(NeoBERTPreTrainedModel):
 
         # Transformer encoder
         for layer in self.transformer_encoder:
-            layer_output = layer(x, pad_mask, freqs_cis,output_expert_usage_loss)
+            layer_output = layer(x, pad_mask, freqs_cis, output_expert_usage_loss)
             x = layer_output[0]
             if output_router_logits:
-               router_logits = layer_output[1] #we always  output the router_logits at an encoder layer
-               concatenated_router_logits = concatenated_router_logits + (router_logits,)
+                router_logits = layer_output[
+                    1
+                ]  # we always  output the router_logits at an encoder layer
+                concatenated_router_logits = concatenated_router_logits + (
+                    router_logits,
+                )
             if output_expert_usage_loss:
                 mean_expert_usage_loss = layer_output[2]
                 total_mean_expert_usage_loss += mean_expert_usage_loss
-            
 
             # if output_activations:
             #     block_activations = layer_output[3]
 
-    
             # if output_all_pathways:
             #     expert_usages.append(router_logits.cpu().detach().numpy())
 
             # if output_activations:
             #     expert_activations.append(block_activations)
-            
+
         # Final normalization layer
-        output = {"hidden_representation":self.layer_norm(x)}
+        output = {"hidden_representation": self.layer_norm(x)}
         if output_router_logits:
             output["router_logits"] = concatenated_router_logits
         if output_expert_usage_loss:
@@ -695,7 +851,7 @@ class NeoBERT(NeoBERTPreTrainedModel):
         # if output_activations:
         #     output += (expert_activations,)
 
-        return output #ATTENTION ON A CHANGE LA FORME DE l'OUTPUT. MAINTENANT ON A AUSSI LA LOSS
+        return output  # ATTENTION ON A CHANGE LA FORME DE l'OUTPUT. MAINTENANT ON A AUSSI LA LOSS
 
 
 class NormNeoBERT(NeoBERTPreTrainedModel):
@@ -706,19 +862,29 @@ class NormNeoBERT(NeoBERTPreTrainedModel):
 
         self.config = config
 
-        self.encoder = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
+        self.encoder = nn.Embedding(
+            config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id
+        )
 
         if self.config.rope:
-            self.freqs_cis = precompute_freqs_cis(config.hidden_size // config.num_attention_heads, config.max_length)
+            self.freqs_cis = precompute_freqs_cis(
+                config.hidden_size // config.num_attention_heads, config.max_length
+            )
         else:
-            self.positional_embedding = nn.Embedding(config.max_length + 1, config.hidden_size, padding_idx=config.pad_token_id)
+            self.positional_embedding = nn.Embedding(
+                config.max_length + 1,
+                config.hidden_size,
+                padding_idx=config.pad_token_id,
+            )
 
         self.transformer_encoder = nn.ModuleList()
         for _ in range(config.num_hidden_layers):
             self.transformer_encoder.append(NormEncoderBlock(config))
 
         self.layer_norm = (
-            RMSNorm(config.hidden_size, config.norm_eps) if config.rms_norm else nn.LayerNorm(config.hidden_size, config.norm_eps)
+            RMSNorm(config.hidden_size, config.norm_eps)
+            if config.rms_norm
+            else nn.LayerNorm(config.hidden_size, config.norm_eps)
         )
 
         # Initialize weights and apply final processing
@@ -726,17 +892,29 @@ class NormNeoBERT(NeoBERTPreTrainedModel):
 
         for pn, p in self.named_parameters():
             if pn.endswith("c_proj.weight"):
-                torch.nn.init.normal_(p, mean=0.0, std=config.base_scale / math.sqrt(2 * config.num_hidden_layers))
+                torch.nn.init.normal_(
+                    p,
+                    mean=0.0,
+                    std=config.base_scale / math.sqrt(2 * config.num_hidden_layers),
+                )
 
         self.sz_init_value = 1.00
         self.sz_init_scaling = config.base_scale
-        self.sz = torch.nn.Parameter(self.sz_init_scaling * torch.ones(config.vocab_size, dtype=torch.float32))
+        self.sz = torch.nn.Parameter(
+            self.sz_init_scaling * torch.ones(config.vocab_size, dtype=torch.float32)
+        )
 
     def forward(self, src, pad_mask=None):
         # Expand and repeat: (Batch, Length) -> (Batch, Heads, Length, Length)
         if pad_mask is not None:
-            assert pad_mask.dtype != torch.bool and 1.0 not in pad_mask, "NeoBERT expects an additive pad_mask"
-            pad_mask = pad_mask.unsqueeze(1).unsqueeze(1).repeat(1, self.config.num_attention_heads, pad_mask.size(-1), 1)
+            assert (
+                pad_mask.dtype != torch.bool and 1.0 not in pad_mask
+            ), "NeoBERT expects an additive pad_mask"
+            pad_mask = (
+                pad_mask.unsqueeze(1)
+                .unsqueeze(1)
+                .repeat(1, self.config.num_attention_heads, pad_mask.size(-1), 1)
+            )
 
         # RoPE
         freqs_cis = None
@@ -775,8 +953,16 @@ class NeoBERTLMHead(NeoBERTPreTrainedModel):
 
         self.post_init()
 
-    def forward(self, src, pad_mask=None, output_expert_usage_loss: bool = False,output_router_logits: bool = False):
-        NeoBERT_output = self.model.forward(src, pad_mask, output_expert_usage_loss,output_router_logits)
+    def forward(
+        self,
+        src,
+        pad_mask=None,
+        output_expert_usage_loss: bool = False,
+        output_router_logits: bool = False,
+    ):
+        NeoBERT_output = self.model.forward(
+            src, pad_mask, output_expert_usage_loss, output_router_logits
+        )
         logits = self.decoder(NeoBERT_output["hidden_representation"])
 
         NeoBERT_output["logits"] = logits
@@ -784,7 +970,8 @@ class NeoBERTLMHead(NeoBERTPreTrainedModel):
 
         return NeoBERT_output
 
-#ATTENTION: on a changé les outputs
+
+# ATTENTION: on a changé les outputs
 
 
 class NeoBERTForSequenceClassification(NeoBERTPreTrainedModel):
@@ -819,9 +1006,17 @@ class NeoBERTForSequenceClassification(NeoBERTPreTrainedModel):
             if module.bias is not None:
                 module.bias.data.zero_()
 
-    def forward(self, src, pad_mask=None, output_expert_usage_loss: bool = False, output_router_logits: bool = False):
+    def forward(
+        self,
+        src,
+        pad_mask=None,
+        output_expert_usage_loss: bool = False,
+        output_router_logits: bool = False,
+    ):
         hidden_representation = self.model.forward(src, pad_mask)
-        NeoBERT_output = self.model.forward(src, pad_mask, output_expert_usage_loss,output_router_logits)
+        NeoBERT_output = self.model.forward(
+            src, pad_mask, output_expert_usage_loss, output_router_logits
+        )
         hidden_representation = NeoBERT_output["hidden_representation"]
 
         x = hidden_representation[:, 0, :]
@@ -892,7 +1087,9 @@ class NeoBERTHFForSequenceClassification(NeoBERTPreTrainedModel):
             if self.config.problem_type is None:
                 if self.num_labels == 1:
                     self.config.problem_type = "regression"
-                elif self.num_labels > 1 and (labels.dtype == torch.long or labels.dtype == torch.int):
+                elif self.num_labels > 1 and (
+                    labels.dtype == torch.long or labels.dtype == torch.int
+                ):
                     self.config.problem_type = "single_label_classification"
                 else:
                     self.config.problem_type = "multi_label_classification"
@@ -946,8 +1143,13 @@ class NeoBERTForMTEB(NeoBERTPreTrainedModel):
     def encode_queries(self, queries: List[str], **kwargs):
         if "instructions" in kwargs:
             if kwargs["instructions"] is not None:
-                queries = [(query + " " + kwargs["instructions"][query]).strip() for query in queries]
-            new_kwargs = {k: v for k, v in kwargs.items() if k not in ["instructions", "qid"]}
+                queries = [
+                    (query + " " + kwargs["instructions"][query]).strip()
+                    for query in queries
+                ]
+            new_kwargs = {
+                k: v for k, v in kwargs.items() if k not in ["instructions", "qid"]
+            }
         else:
             new_kwargs = kwargs
 
@@ -959,17 +1161,30 @@ class NeoBERTForMTEB(NeoBERTPreTrainedModel):
     def encode_corpus(self, corpus: List[Dict[str, str]], batch_size: int, **kwargs):
         if isinstance(corpus, dict):
             sentences = [
-                (corpus["title"][i] + " " + corpus["text"][i]).strip() if "title" in corpus else corpus["text"][i].strip()
+                (
+                    (corpus["title"][i] + " " + corpus["text"][i]).strip()
+                    if "title" in corpus
+                    else corpus["text"][i].strip()
+                )
                 for i in range(len(corpus["text"]))
             ]
         else:
             if isinstance(corpus[0], dict):
-                sentences = [(doc["title"] + " " + doc["text"]).strip() if "title" in doc else doc["text"].strip() for doc in corpus]
+                sentences = [
+                    (
+                        (doc["title"] + " " + doc["text"]).strip()
+                        if "title" in doc
+                        else doc["text"].strip()
+                    )
+                    for doc in corpus
+                ]
             else:
                 sentences = corpus
 
         if "instructions" in kwargs:  # not used on the doc side
-            new_kwargs = {k: v for k, v in kwargs.items() if k not in ["instructions", "qid"]}
+            new_kwargs = {
+                k: v for k, v in kwargs.items() if k not in ["instructions", "qid"]
+            }
         else:
             new_kwargs = kwargs
 
@@ -1006,7 +1221,9 @@ class NeoBERTForMTEB(NeoBERTPreTrainedModel):
         dataset: Dataset = Dataset.from_dict({"input_texts": sentences})
         dataset.set_transform(partial(_transform_func, self.tokenizer))
 
-        data_collator = data_collator = DataCollatorWithPadding(self.tokenizer, pad_to_multiple_of=8)
+        data_collator = data_collator = DataCollatorWithPadding(
+            self.tokenizer, pad_to_multiple_of=8
+        )
         dataloader = DataLoader(
             dataset,
             collate_fn=data_collator,
@@ -1017,17 +1234,25 @@ class NeoBERTForMTEB(NeoBERTPreTrainedModel):
         )
 
         encodings = []
-        for batch in tqdm(dataloader, desc="encoding", mininterval=10, disable=len(sentences) < 128):
+        for batch in tqdm(
+            dataloader, desc="encoding", mininterval=10, disable=len(sentences) < 128
+        ):
             input_ids = batch["input_ids"].to(device)
 
             pad_mask = batch["attention_mask"].to(device)
-            xformers_mask = torch.where(pad_mask == 1, float(0.0), float("-inf")).type(torch.float16)
+            xformers_mask = torch.where(pad_mask == 1, float(0.0), float("-inf")).type(
+                torch.float16
+            )
 
             outputs = self.model(input_ids, xformers_mask)
 
             if self.pooling == "avg":
-                outputs = outputs * pad_mask.unsqueeze(-1).expand(-1, -1, outputs.shape[-1])
-                outputs = outputs.sum(dim=1) / pad_mask.to(device).sum(dim=1).unsqueeze(-1)
+                outputs = outputs * pad_mask.unsqueeze(-1).expand(
+                    -1, -1, outputs.shape[-1]
+                )
+                outputs = outputs.sum(dim=1) / pad_mask.to(device).sum(dim=1).unsqueeze(
+                    -1
+                )
             else:
                 outputs = outputs[:, 0, :]
 
