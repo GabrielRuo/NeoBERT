@@ -2,6 +2,7 @@ import os
 import shutil
 import re
 import warnings
+from contextlib import nullcontext
 from tqdm import tqdm
 
 from omegaconf import OmegaConf, DictConfig
@@ -49,11 +50,6 @@ import wandb
 
 def _resolve_mixed_precision(requested_mixed_precision: str) -> str:
     requested = str(requested_mixed_precision).lower()
-
-    if requested == "auto":
-        if torch.cuda.is_available():
-            return "bf16" if torch.cuda.is_bf16_supported() else "fp16"
-        return "no"
 
     if requested == "bf16" and torch.cuda.is_available() and not torch.cuda.is_bf16_supported():
         warnings.warn(
@@ -390,132 +386,24 @@ def trainer(cfg: DictConfig):
                 stored_batch = batch
                 continue
 
-            # Under the no_sync context manager, PyTorch will skip synchronizing the gradients when .backward() is
-            # called, and the first call to .backward() outside this context manager will trigger the synchronization.
-            # Accumulating manually gives more flexibility and is compatible with TPUs.
-            if (
-                metrics["train/batches"] % cfg.trainer.gradient_accumulation_steps != 0
-            ):  # ATTENTION IN OUR CURRENT SETTINGS WE DO NOT USE GRADIENT ACCUMULATION HENCE THIS IS NEVER ENTERED
-                with accelerator.no_sync(model):
-                    # Forward pass
+            # Under no_sync, PyTorch skips gradient synchronization during backward.
+            # Synchronization happens on the next backward outside this context.
+            should_step = (
+                metrics["train/batches"] % cfg.trainer.gradient_accumulation_steps == 0
+            )
+            sync_context = (
+                nullcontext() if should_step else accelerator.no_sync(model)
+            )
 
-                    if cfg.model.type == "homo_moe":
-                        model_output = model(
-                            batch["input_ids"],
-                            batch.get("attention_mask", None),
-                            output_expert_usage_loss=False,
-                            output_router_logits=True,
-                        )
-                        train_loss, mlm_loss, load_balancing_loss = homo_moe_loss_fn(
-                            model_output["logits"],
-                            model_output["router_logits"],
-                            cfg,
-                            batch,
-                        )
-                    if cfg.model.type == "hetero_moe":
-                        model_output = model(
-                            batch["input_ids"],
-                            batch.get("attention_mask", None),
-                            output_expert_usage_loss=False,
-                            output_router_logits=True,
-                        )
-                        (
-                            train_loss,
-                            penalty_loss,
-                            entropy_loss,
-                            mean_num_activated_experts,
-                        ) = hetero_moe_loss_fn(
-                            model_output["logits"],
-                            model_output["router_logits"],
-                            cfg,
-                            batch,
-                        )
-                    if cfg.model.type == "mop":
-                        num_masked_tokens = (
-                            cfg.dataloader.train.batch_size
-                            * cfg.tokenizer.max_length
-                            * metrics["train/steps"]
-                            * cfg.datacollator.mlm_probability
-                        )
-                        model_output = model(
-                            batch["input_ids"],
-                            batch.get("attention_mask", None),
-                            output_expert_usage_loss=True,
-                            output_router_logits=False,
-                        )
-                        # train_loss,mlm_loss,expert_loss, cost_based_loss_alpha = mop_loss_fn(model_output['logits'], model_output['expert_usage_loss'], cfg, batch, num_masked_tokens)
-                        (
-                            train_loss,
-                            mlm_loss,
-                            expert_loss,
-                            load_balancing_loss,
-                            cost_based_loss_alpha,
-                        ) = mop_loss_fn_balanced(
-                            model_output["logits"],
-                            model_output["router_logits"],
-                            model_output["expert_usage_loss"],
-                            cfg,
-                            batch,
-                            num_masked_tokens,
-                        )
-                        # train_loss,mlm_loss,expert_loss,cost_based_loss_alpha = mop_loss_fn_alt(model_output['logits'], model_output['router_logits'], cfg, batch, num_masked_tokens)
+            mop_expert_loss = None
+            mop_load_balancing_loss = None
+            cost_based_loss_alpha = None
+            hetero_penalty_loss = None
+            hetero_entropy_loss = None
+            mean_num_activated_experts = None
+            homo_load_balancing_loss = None
 
-                    logits = model_output["logits"]
-                    # Compute gradient
-                    # if metrics["train/steps"] % 2== 0:
-                    #     accelerator.backward(mlm_loss)
-                    # else:
-                    #     accelerator.backward(load_balancing_loss)
-
-                    accelerator.backward(train_loss)
-                    # accelerator.backward(mlm_loss)
-
-                    # Log metrics
-                    metrics["train/local_samples"] += batch["input_ids"].shape[0]
-                    if "attention_mask" in batch.keys():
-                        metrics["train/local_tokens"] += (
-                            (batch["attention_mask"] == 0).sum().item()
-                        )
-                    else:
-                        metrics["train/local_tokens"] += batch["input_ids"].shape[1]
-                    metrics["train/local_num_pred"] += (
-                        (batch["labels"] != -100).sum().item()
-                    )
-                    metrics["train/local_sum_loss"] += (
-                        train_loss.item() * (batch["labels"] != -100).sum().item()
-                    )
-                    metrics["train/local_sum_mlm_loss"] += (
-                        mlm_loss.item() * (batch["labels"] != -100).sum().item()
-                    )
-                    metrics["train/local_num_correct"] += (
-                        (logits.argmax(dim=-1) == batch["labels"]).sum().item()
-                    )
-                    if cfg.model.type == "mop":
-                        metrics["train/local_sum_expert_loss"] += (
-                            expert_loss.item() * (batch["labels"] != -100).sum().item()
-                        )
-                        metrics["train/cost_based_loss_alpha"] = (
-                            cost_based_loss_alpha.item()
-                        )
-                        metrics["train/local_sum_load_balancing_loss"] += (
-                            load_balancing_loss.item()
-                            * (batch["labels"] != -100).sum().item()
-                        )
-
-                    if cfg.model.type == "hetero_moe":
-                        metrics["train/local_sum_penalty_loss"] += (
-                            penalty_loss.item() * (batch["labels"] != -100).sum().item()
-                        )
-                        metrics["train/local_sum_entropy_loss"] += (
-                            entropy_loss.item() * (batch["labels"] != -100).sum().item()
-                        )
-                    if cfg.model.type == "homo_moe":
-                        metrics["train/local_sum_load_balancing_loss"] += (
-                            load_balancing_loss.item()
-                            * (batch["labels"] != -100).sum().item()
-                        )
-
-            else:
+            with sync_context:
                 # Forward pass
                 if cfg.model.type == "neobert_original":
                     model_output = model(
@@ -528,7 +416,7 @@ def trainer(cfg: DictConfig):
                         batch["labels"].view(-1),
                     )
                     mlm_loss = train_loss
-                if cfg.model.type == "homo_moe":
+                elif cfg.model.type == "homo_moe":
                     model_output = model(
                         batch["input_ids"],
                         batch.get("attention_mask", None),
@@ -541,7 +429,8 @@ def trainer(cfg: DictConfig):
                         cfg,
                         batch,
                     )
-                if cfg.model.type == "hetero_moe":
+                    homo_load_balancing_loss = load_balancing_loss
+                elif cfg.model.type == "hetero_moe":
                     model_output = model(
                         batch["input_ids"],
                         batch.get("attention_mask", None),
@@ -560,7 +449,9 @@ def trainer(cfg: DictConfig):
                         cfg,
                         batch,
                     )
-                if cfg.model.type == "mop":
+                    hetero_penalty_loss = penalty_loss
+                    hetero_entropy_loss = entropy_loss
+                elif cfg.model.type == "mop":
                     num_masked_tokens = (
                         cfg.dataloader.train.batch_size
                         * cfg.tokenizer.max_length
@@ -588,7 +479,76 @@ def trainer(cfg: DictConfig):
                         batch,
                         num_masked_tokens,
                     )
-                    # run the analyses
+                    mop_expert_loss = expert_loss
+                    mop_load_balancing_loss = load_balancing_loss
+                else:
+                    raise ValueError(f"Unsupported model type: {cfg.model.type}")
+
+                logits = model_output["logits"]
+
+                # Compute gradient
+                # if metrics["train/steps"] % 2== 0:
+                #     accelerator.backward(mlm_loss)
+                # else:
+                #     accelerator.backward(expert_loss)
+                accelerator.backward(train_loss)
+                # accelerator.backward(load_balancing_loss)
+
+            # Log local counters every micro-batch.
+            metrics["train/local_samples"] += batch["input_ids"].shape[0]
+            if "attention_mask" in batch.keys():
+                metrics["train/local_tokens"] += (
+                    (batch["attention_mask"] == 0).sum().item()
+                )
+            else:
+                metrics["train/local_tokens"] += batch["input_ids"].shape[1]
+            metrics["train/local_num_pred"] += (
+                (batch["labels"] != -100).sum().item()
+            )
+            metrics["train/local_sum_loss"] += (
+                train_loss.item() * (batch["labels"] != -100).sum().item()
+            )
+            metrics["train/local_sum_mlm_loss"] += (
+                mlm_loss.item() * (batch["labels"] != -100).sum().item()
+            )
+            metrics["train/local_num_correct"] += (
+                (logits.argmax(dim=-1) == batch["labels"]).sum().item()
+            )
+
+            if (
+                mop_expert_loss is not None
+                and cost_based_loss_alpha is not None
+                and mop_load_balancing_loss is not None
+            ):
+                metrics["train/local_sum_expert_loss"] += (
+                    float(mop_expert_loss) * (batch["labels"] != -100).sum().item()
+                )
+                metrics["train/cost_based_loss_alpha"] = float(cost_based_loss_alpha)
+                metrics["train/local_sum_load_balancing_loss"] += (
+                    float(mop_load_balancing_loss)
+                    * (batch["labels"] != -100).sum().item()
+                )
+            elif hetero_penalty_loss is not None and hetero_entropy_loss is not None:
+                metrics["train/local_sum_penalty_loss"] += (
+                    float(hetero_penalty_loss)
+                    * (batch["labels"] != -100).sum().item()
+                )
+                metrics["train/local_sum_entropy_loss"] += (
+                    float(hetero_entropy_loss)
+                    * (batch["labels"] != -100).sum().item()
+                )
+                if mean_num_activated_experts is not None:
+                    metrics["train/mean_num_activated_experts"] = (
+                        float(mean_num_activated_experts)
+                    )
+            elif homo_load_balancing_loss is not None:
+                metrics["train/local_sum_load_balancing_loss"] += (
+                    float(homo_load_balancing_loss)
+                    * (batch["labels"] != -100).sum().item()
+                )
+
+            if should_step:
+                # run the analyses
                 analysistraining(batch, model_output, metrics["train/steps"], metrics)
 
                 # ANALYSING CORRELATION BETWEEN EXPERT USAGE AND LOSS AND MSE LOSS PER SEQUENCE
@@ -641,16 +601,6 @@ def trainer(cfg: DictConfig):
                 #     expert_usage_buffer = []
                 #     mse_loss_buffer = []
 
-                logits = model_output["logits"]
-
-                # if metrics["train/steps"] % 2== 0:
-                #         accelerator.backward(mlm_loss)
-                # else:
-                #     accelerator.backward(expert_loss)
-                # Compute gradient and apply clipping
-                accelerator.backward(train_loss)
-                # accelerator.backward(load_balancing_loss)
-
                 if (
                     cfg.trainer.gradient_clipping is not None
                     and cfg.trainer.gradient_clipping > 0
@@ -669,55 +619,9 @@ def trainer(cfg: DictConfig):
                 #             max_val = param.grad.abs().max().item()
                 #             print(f"[GRAD HUGE] Layer '{name}' has gradient magnitude up to {max_val:.3e}")
 
-                # Log metrics
+                # Log step-level metrics
                 pbar.update(1)
                 metrics["train/steps"] += 1
-                metrics["train/local_samples"] += batch["input_ids"].shape[0]
-                if "attention_mask" in batch.keys():
-                    metrics["train/local_tokens"] += (
-                        (batch["attention_mask"] == 0).sum().item()
-                    )
-                else:
-                    metrics["train/local_tokens"] += batch["input_ids"].shape[1]
-                metrics["train/local_num_pred"] += (
-                    (batch["labels"] != -100).sum().item()
-                )
-                metrics["train/local_sum_loss"] += (
-                    train_loss.item() * (batch["labels"] != -100).sum().item()
-                )
-                metrics["train/local_sum_mlm_loss"] += (
-                    mlm_loss.item() * (batch["labels"] != -100).sum().item()
-                )
-                metrics["train/local_num_correct"] += (
-                    (logits.argmax(dim=-1) == batch["labels"]).sum().item()
-                )
-
-                if cfg.model.type == "mop":
-                    metrics["train/local_sum_expert_loss"] += (
-                        expert_loss.item() * (batch["labels"] != -100).sum().item()
-                    )
-                    metrics["train/cost_based_loss_alpha"] = (
-                        cost_based_loss_alpha.item()
-                    )
-                    metrics["train/local_sum_load_balancing_loss"] += (
-                        load_balancing_loss.item()
-                        * (batch["labels"] != -100).sum().item()
-                    )
-                if cfg.model.type == "hetero_moe":
-                    metrics["train/local_sum_penalty_loss"] += (
-                        penalty_loss.item() * (batch["labels"] != -100).sum().item()
-                    )
-                    metrics["train/local_sum_entropy_loss"] += (
-                        entropy_loss.item() * (batch["labels"] != -100).sum().item()
-                    )
-                    metrics["train/mean_num_activated_experts"] = (
-                        mean_num_activated_experts.item()
-                    )
-                if cfg.model.type == "homo_moe":
-                    metrics["train/local_sum_load_balancing_loss"] += (
-                        load_balancing_loss.item()
-                        * (batch["labels"] != -100).sum().item()
-                    )
 
                 # Update the parameters and the scheduler
                 optimizer.step()
