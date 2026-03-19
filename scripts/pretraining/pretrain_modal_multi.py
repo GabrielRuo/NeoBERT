@@ -36,9 +36,10 @@ def get_arg_value(key, cli_arguments):
 # schedule_list = [2500000]
 # cost_exponent_list = [2]
 import numpy as np
-alpha_start_list = [1e-10]#[5e-10]
-alpha_end_list = list(np.array([4e-7,6e-7,8e-7,1.3e-6,1.6e-6,3e-6]))
-#alpha_end_list = list(np.array([0.0,5e-9,8e-9,2e-8,4e-8,7e-8,9e-8,2e-7,4e-7,6e-7,8e-7,1e-6,5e-6,1e-5])/5)
+
+alpha_start_list = [1e-10]  # [5e-10]
+alpha_end_list = list(np.array([4e-7, 6e-7, 8e-7, 1.3e-6, 1.6e-6, 3e-6]))
+# alpha_end_list = list(np.array([0.0,5e-9,8e-9,2e-8,4e-8,7e-8,9e-8,2e-7,4e-7,6e-7,8e-7,1e-6,5e-6,1e-5])/5)
 alpha_scaling_list = [0.0]
 schedule_list = [2500000]
 cost_exponent_list = [2]
@@ -48,8 +49,6 @@ cost_exponent_list = [2]
 # alpha_scaling_list = [0.0]
 # schedule_list = [2500000]
 # cost_exponent_list = [2]
-
-
 
 
 # ------------------------------------------------
@@ -68,8 +67,8 @@ def run_many(cli_overrides_base, model_type):
                                 f"model.loss.cost_based_loss_alpha_end={alpha_end}",
                                 f"model.loss.cost_based_loss_schedule_tokens={schedule}",
                                 f"model.expert_cost_exponent={cost_exponent}",
-                                f"model.loss.alpha_scaling={alpha_scaling}"
-                                ]
+                                f"model.loss.alpha_scaling={alpha_scaling}",
+                            ]
                             print(
                                 f"Launching run: "
                                 f"alpha_start={alpha_start}, alpha_end={alpha_end}, "

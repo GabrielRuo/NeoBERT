@@ -13,3 +13,4 @@ model:
   max_ckpt: 1000
 dir: /runs/logs/checkpoints
 save_model: False
+test_after_training: True

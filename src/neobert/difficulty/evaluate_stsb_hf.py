@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from scipy.stats import pearsonr
 
+
 def main():
     # Load model and tokenizer
     model_name = "textattack/bert-base-uncased-STS-B"
@@ -25,7 +26,7 @@ def main():
             truncation=True,
             max_length=128,
             padding="max_length",
-            return_tensors="pt"
+            return_tensors="pt",
         )
         with torch.no_grad():
             outputs = model(**inputs)
@@ -40,6 +41,7 @@ def main():
 
     print(f"Validation MSE: {mse:.4f}")
     print(f"Validation Pearson correlation: {pearson:.4f}")
+
 
 if __name__ == "__main__":
     main()

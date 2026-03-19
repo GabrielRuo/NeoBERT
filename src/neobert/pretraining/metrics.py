@@ -27,16 +27,24 @@ class Metrics(defaultdict):
             if isinstance(v, (int, float)):
                 scalar_metrics[k] = v
             else:
-                non_scalar_metrics[k] = v   # wandb Tables, plots, etc.
+                non_scalar_metrics[k] = v  # wandb Tables, plots, etc.
 
-        metrics_agg = Tensor(list(scalar_metrics.values())).to(accelerator.device, non_blocking=True)
-        metrics_agg = accelerator.reduce(metrics_agg, reduction="sum").detach().cpu().numpy()
+        metrics_agg = Tensor(list(scalar_metrics.values())).to(
+            accelerator.device, non_blocking=True
+        )
+        metrics_agg = (
+            accelerator.reduce(metrics_agg, reduction="sum").detach().cpu().numpy()
+        )
         metrics_agg = {k: v for k, v in zip(scalar_metrics.keys(), metrics_agg)}
 
         # Update global values
-        self["train/samples"] = self["train/samples"] + metrics_agg["train/local_samples"]
+        self["train/samples"] = (
+            self["train/samples"] + metrics_agg["train/local_samples"]
+        )
         self["train/tokens"] = self["train/tokens"] + metrics_agg["train/local_tokens"]
-        self["train/masked_tokens"] = self["train/masked_tokens"] + metrics_agg["train/local_num_pred"]
+        self["train/masked_tokens"] = (
+            self["train/masked_tokens"] + metrics_agg["train/local_num_pred"]
+        )
 
         # Build the metrics to log
         metrics_log = dict()
@@ -44,36 +52,59 @@ class Metrics(defaultdict):
             metrics_log[key] = self[key]
 
         if metrics_agg["train/local_num_pred"] > 0:
-            metrics_log["train/loss"] = metrics_agg["train/local_sum_loss"] / metrics_agg["train/local_num_pred"]
-            metrics_log["train/mlm_loss"] = metrics_agg["train/local_sum_mlm_loss"] / metrics_agg["train/local_num_pred"]
+            metrics_log["train/loss"] = (
+                metrics_agg["train/local_sum_loss"]
+                / metrics_agg["train/local_num_pred"]
+            )
+            metrics_log["train/mlm_loss"] = (
+                metrics_agg["train/local_sum_mlm_loss"]
+                / metrics_agg["train/local_num_pred"]
+            )
             del metrics_log["train/local_sum_mlm_loss"]
             if model_type == "mop":
-                metrics_log["train/expert_loss"] = metrics_agg["train/local_sum_expert_loss"] / metrics_agg["train/local_num_pred"]
+                metrics_log["train/expert_loss"] = (
+                    metrics_agg["train/local_sum_expert_loss"]
+                    / metrics_agg["train/local_num_pred"]
+                )
                 del metrics_log["train/local_sum_expert_loss"]
 
-                metrics_log["train/load_balancing_loss"] = metrics_agg["train/local_sum_load_balancing_loss"] / metrics_agg["train/local_num_pred"]
+                metrics_log["train/load_balancing_loss"] = (
+                    metrics_agg["train/local_sum_load_balancing_loss"]
+                    / metrics_agg["train/local_num_pred"]
+                )
                 del metrics_log["train/local_sum_load_balancing_loss"]
 
             if model_type == "hetero_moe":
-                metrics_log["train/penalty_loss"] = metrics_agg["train/local_sum_penalty_loss"] / metrics_agg["train/local_num_pred"]
-                metrics_log["train/entropy_loss"] = metrics_agg["train/local_sum_entropy_loss"] / metrics_agg["train/local_num_pred"]
+                metrics_log["train/penalty_loss"] = (
+                    metrics_agg["train/local_sum_penalty_loss"]
+                    / metrics_agg["train/local_num_pred"]
+                )
+                metrics_log["train/entropy_loss"] = (
+                    metrics_agg["train/local_sum_entropy_loss"]
+                    / metrics_agg["train/local_num_pred"]
+                )
                 del metrics_log["train/local_sum_penalty_loss"]
                 del metrics_log["train/local_sum_entropy_loss"]
             if model_type == "homo_moe":
-                metrics_log["train/load_balancing_loss"] = metrics_agg["train/local_sum_load_balancing_loss"] / metrics_agg["train/local_num_pred"]
+                metrics_log["train/load_balancing_loss"] = (
+                    metrics_agg["train/local_sum_load_balancing_loss"]
+                    / metrics_agg["train/local_num_pred"]
+                )
                 del metrics_log["train/local_sum_load_balancing_loss"]
             metrics_log["train/perplexity"] = math.exp(metrics_log["train/loss"])
-            metrics_log["train/accuracy"] = metrics_agg["train/local_num_correct"] / metrics_agg["train/local_num_pred"]
+            metrics_log["train/accuracy"] = (
+                metrics_agg["train/local_num_correct"]
+                / metrics_agg["train/local_num_pred"]
+            )
 
-            del metrics_log['train/steps']
-            del metrics_log['train/local_num_pred']
-            del metrics_log['train/local_num_correct']
-            del metrics_log['train/local_sum_loss']
-            del metrics_log['train/batches']
-            
+            del metrics_log["train/steps"]
+            del metrics_log["train/local_num_pred"]
+            del metrics_log["train/local_num_correct"]
+            del metrics_log["train/local_sum_loss"]
+            del metrics_log["train/batches"]
 
         # Log the metrics
-        
+
         accelerator.log(metrics_log)
 
         # Reset the local counters
