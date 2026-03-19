@@ -42,11 +42,6 @@ from ..analysis import AnalysisTraining
 def _resolve_mixed_precision(requested_mixed_precision: str) -> str:
     requested = str(requested_mixed_precision).lower()
 
-    if requested == "auto":
-        if torch.cuda.is_available():
-            return "bf16" if torch.cuda.is_bf16_supported() else "fp16"
-        return "no"
-
     if requested == "bf16" and torch.cuda.is_available() and not torch.cuda.is_bf16_supported():
         warnings.warn(
             "Requested bf16 but current CUDA device does not support it. Falling back to fp16."

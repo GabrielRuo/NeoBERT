@@ -28,7 +28,9 @@ def get_scheduler(
     """
 
     if decay.lower() not in ["cosine", "linear"]:
-        raise ValueError(f"Decay {decay} is not a valid type. Options are cosine and linear.")
+        raise ValueError(
+            f"Decay {decay} is not a valid type. Options are cosine and linear."
+        )
 
     assert (constant_steps == 0 and warmup_steps < decay_steps) or (
         warmup_steps < constant_steps and constant_steps < decay_steps
@@ -38,7 +40,9 @@ def get_scheduler(
     milestones = []
 
     # Warmup scheduler
-    schedulers.append(LinearLR(optimizer, start_factor=1e-4, end_factor=1.0, total_iters=warmup_steps))
+    schedulers.append(
+        LinearLR(optimizer, start_factor=1e-4, end_factor=1.0, total_iters=warmup_steps)
+    )
     milestones.append(warmup_steps)
 
     # Optional constant scheduler at peak learning rate
@@ -50,7 +54,9 @@ def get_scheduler(
     schedulers.append(
         CosineAnnealingLR(optimizer, T_max=decay_steps, eta_min=lr * final_ratio)
         if decay == "cosine"
-        else LinearLR(optimizer, start_factor=1.0, end_factor=final_ratio, total_iters=decay_steps)
+        else LinearLR(
+            optimizer, start_factor=1.0, end_factor=final_ratio, total_iters=decay_steps
+        )
     )
 
     milestones.append(decay_steps)

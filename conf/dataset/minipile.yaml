@@ -6,6 +6,7 @@ train:
   split: train
   num_samples: null
   streaming: False
+  path_to_disk: null
 test:
   hf_path: JeanKaddour/minipile
   split: test

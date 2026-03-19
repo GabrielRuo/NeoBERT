@@ -31,9 +31,13 @@ from transformers import (
     AutoModelForSequenceClassification,
     AutoModelForMaskedLM,
 )
+
 # from deepspeed.utils.zero_to_fp32 import load_state_dict_from_zero_checkpoint
 
-from neobert.model import NeoBERTForSequenceClassification, NeoBERTConfig # ,NomicBERTForSequenceClassification
+from neobert.model import (
+    NeoBERTForSequenceClassification,
+    NeoBERTConfig,
+)  # ,NomicBERTForSequenceClassification
 from neobert.tokenizer import get_tokenizer
 from .process import process_function
 from ..dataloader import get_dataloader
@@ -64,6 +68,7 @@ TASK_TO_TRANSFER_FROM = {
     "rte": "mnli",
 }
 
+
 def get_evaluation(
     model,
     dataloader,
@@ -80,11 +85,14 @@ def get_evaluation(
     eval_metric = None
     progress_bar = tqdm(range(len(dataloader)), desc="Running evaluation...")
     for step, batch in tqdm(enumerate(dataloader)):
-        if step>10: break  # For faster evaluation during testing
+        if step > 10:
+            break  # For faster evaluation during testing
         progress_bar.update(1)
         with torch.no_grad():
             if flash_attention:
-                pad_mask = torch.where(batch["attention_mask"] == 1, float(0.0), float("-inf")).type(dtype_pad_mask)
+                pad_mask = torch.where(
+                    batch["attention_mask"] == 1, float(0.0), float("-inf")
+                ).type(dtype_pad_mask)
             else:
                 pad_mask = batch["attention_mask"].type(dtype_pad_mask)
             logits = model(batch["input_ids"], pad_mask)["logits"]
@@ -96,12 +104,18 @@ def get_evaluation(
 
         if compute_metric:
             if accelerator is not None:
-                batch_predictions, references = accelerator.gather((batch_predictions, batch["labels"]))
+                batch_predictions, references = accelerator.gather(
+                    (batch_predictions, batch["labels"])
+                )
                 # If we are in a multiprocess environment, the last batch has duplicates
                 if accelerator.num_processes > 1:
                     if step == len(dataloader) - 1:
-                        batch_predictions = batch_predictions[: len(dataloader.dataset) - samples_seen]
-                        references = references[: len(dataloader.dataset) - samples_seen]
+                        batch_predictions = batch_predictions[
+                            : len(dataloader.dataset) - samples_seen
+                        ]
+                        references = references[
+                            : len(dataloader.dataset) - samples_seen
+                        ]
                     else:
                         samples_seen += references.shape[0]
             else:
@@ -124,6 +138,7 @@ def get_evaluation(
 
     return {"predictions": predictions, "eval_metric": eval_metric}
 
+
 def get_best_checkpoint_path(base_dir, task, num_checkpoints_to_merge=1):
     best_accuracy = -float("inf")
     best_checkpoint_path = None
@@ -133,7 +148,11 @@ def get_best_checkpoint_path(base_dir, task, num_checkpoints_to_merge=1):
     for root, _, files in os.walk(base_dir):
         if task in root:
             # Filter out the JSON files following the naming convention
-            json_files = [f for f in files if f.startswith("all_results_step_") and f.endswith(".json")]
+            json_files = [
+                f
+                for f in files
+                if f.startswith("all_results_step_") and f.endswith(".json")
+            ]
 
             for json_file in json_files:
                 json_path = os.path.join(root, json_file)
@@ -152,7 +171,9 @@ def get_best_checkpoint_path(base_dir, task, num_checkpoints_to_merge=1):
 
                         # Construct the corresponding checkpoint folder path
                         checkpoint = step_number
-                        if os.path.exists(os.path.join(root,"model_checkpoints", str(checkpoint))):
+                        if os.path.exists(
+                            os.path.join(root, "model_checkpoints", str(checkpoint))
+                        ):
                             best_checkpoint_path, best_checkpoint = root, checkpoint
 
     checkpoint_list = [best_checkpoint]
@@ -161,15 +182,24 @@ def get_best_checkpoint_path(base_dir, task, num_checkpoints_to_merge=1):
         ckpts = [int(ckpt) for ckpt in ckpts if int(ckpt) <= int(best_checkpoint)]
         ckpts.sort()
 
-        checkpoint_list = ckpts if len(ckpts) < num_checkpoints_to_merge else ckpts[-num_checkpoints_to_merge:]
+        checkpoint_list = (
+            ckpts
+            if len(ckpts) < num_checkpoints_to_merge
+            else ckpts[-num_checkpoints_to_merge:]
+        )
 
     return best_checkpoint_path, checkpoint_list
+
 
 def save_checkpoint(cfg, model, accelerator, completed_steps, model_checkpoint_dir):
     # time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     # Delete checkpoints with the lesser evaluation accuracy if there are too many
-    if cfg.trainer.max_ckpt is not None and cfg.trainer.max_ckpt > 0 and os.path.isdir(model_checkpoint_dir):
+    if (
+        cfg.trainer.max_ckpt is not None
+        and cfg.trainer.max_ckpt > 0
+        and os.path.isdir(model_checkpoint_dir)
+    ):
         files = os.listdir(model_checkpoint_dir)
         iterations = [f for f in files if f.isdigit()]
         iterations.sort()
@@ -178,7 +208,10 @@ def save_checkpoint(cfg, model, accelerator, completed_steps, model_checkpoint_d
         while iterations is not None and len(iterations) >= cfg.trainer.max_ckpt:
             file_to_remove = iterations.pop(0)
             shutil.rmtree(os.path.join(model_checkpoint_dir, str(file_to_remove)))
-            print(f"Deleted old model checkpoint {file_to_remove} due to limit " f"(max_ckpt = {cfg.trainer.max_ckpt})")
+            print(
+                f"Deleted old model checkpoint {file_to_remove} due to limit "
+                f"(max_ckpt = {cfg.trainer.max_ckpt})"
+            )
 
     # Save the checkpoint
     if accelerator.distributed_type is DistributedType.DEEPSPEED:
@@ -190,6 +223,7 @@ def save_checkpoint(cfg, model, accelerator, completed_steps, model_checkpoint_d
             model.state_dict(),
             os.path.join(path, "state_dict.pt"),
         )
+
 
 def trainer(cfg: DictConfig):
 
@@ -205,7 +239,11 @@ def trainer(cfg: DictConfig):
     )
     accelerator = Accelerator(
         log_with="wandb",
-        mixed_precision="no" if cfg.trainer.mixed_precision == "fp32" else cfg.trainer.mixed_precision,
+        mixed_precision=(
+            "no"
+            if cfg.trainer.mixed_precision == "fp32"
+            else cfg.trainer.mixed_precision
+        ),
         project_config=project_config,
     )
     # Initialise the wandb run and pass wandb parameters
@@ -215,7 +253,8 @@ def trainer(cfg: DictConfig):
             "wandb": {
                 "name": cfg.wandb.name,
                 "entity": cfg.wandb.entity,
-                "config": OmegaConf.to_container(cfg) | {"distributed_type": accelerator.distributed_type},
+                "config": OmegaConf.to_container(cfg)
+                | {"distributed_type": accelerator.distributed_type},
                 "tags": cfg.wandb.tags,
                 "dir": model_dir,
                 "mode": cfg.wandb.mode,
@@ -256,7 +295,9 @@ def trainer(cfg: DictConfig):
             trust_remote_code=True,
         )
     else:
-        pretrained_config_path = os.path.join(cfg.model.pretrained_checkpoint_dir, "config.yaml")
+        pretrained_config_path = os.path.join(
+            cfg.model.pretrained_checkpoint_dir, "config.yaml"
+        )
         model_pretraining_config = OmegaConf.load(pretrained_config_path)
         model_pretraining_config.model.flash_attention = flash_attention
         tokenizer = get_tokenizer(**model_pretraining_config.tokenizer)
@@ -274,7 +315,9 @@ def trainer(cfg: DictConfig):
 
     # Load additional metric for the mismatched validation set of mnli
     if cfg.task == "mnli":
-        mm_metric = evaluate.load(cfg.meta_task, "mnli_mismatched", experiment_id=cfg.id)
+        mm_metric = evaluate.load(
+            cfg.meta_task, "mnli_mismatched", experiment_id=cfg.id
+        )
 
     # def compute_metrics(p: EvalPrediction):
     #     preds = p.predictions[0] if isinstance(p.predictions, tuple) else p.predictions
@@ -293,15 +336,26 @@ def trainer(cfg: DictConfig):
         raw_datasets = load_dataset("sentence-transformers/all-nli", name="pair-class")
 
         def collapse_classes(examples):
-            examples["label"] = [1 if label == 2 else label for label in examples["label"]]
+            examples["label"] = [
+                1 if label == 2 else label for label in examples["label"]
+            ]
             return examples
 
-        raw_datasets.map(collapse_classes, batched=True, desc="Collapsing classes into entailment and not entailment.")
+        raw_datasets.map(
+            collapse_classes,
+            batched=True,
+            desc="Collapsing classes into entailment and not entailment.",
+        )
 
     elif cfg.meta_task == "glue":
         raw_datasets = load_dataset("glue", cfg.task)
     else:
-        raw_datasets = load_dataset("json", data_dir=os.path.join(os.environ["HF_DATASETS_CACHE"], "super_glue", cfg.task))
+        raw_datasets = load_dataset(
+            "json",
+            data_dir=os.path.join(
+                os.environ["HF_DATASETS_CACHE"], "super_glue", cfg.task
+            ),
+        )
 
     # Split between train and validation for datasets that don't have it natively
     if cfg.task in ("axb", "axg"):
@@ -321,10 +375,18 @@ def trainer(cfg: DictConfig):
 
     is_regression = cfg.task == "stsb"
     if not is_regression:
-        processed_datasets = processed_datasets.cast_column("labels", ClassLabel(names=processed_datasets["train"].unique("labels")))
+        processed_datasets = processed_datasets.cast_column(
+            "labels", ClassLabel(names=processed_datasets["train"].unique("labels"))
+        )
 
     train_dataset = processed_datasets["train"]
-    eval_dataset = processed_datasets["validation_matched" if cfg.task == "mnli" else ("dev" if cfg.task == "allnli" else "validation")]
+    eval_dataset = processed_datasets[
+        (
+            "validation_matched"
+            if cfg.task == "mnli"
+            else ("dev" if cfg.task == "allnli" else "validation")
+        )
+    ]
 
     if cfg.task == "mnli":
         mm_eval_dataset = processed_datasets["validation_mismatched"]
@@ -344,8 +406,10 @@ def trainer(cfg: DictConfig):
         logger.info(f"Sample {index} of the evaluation set: {eval_dataset[index]}.")
 
     # DataLoaders creation:
-    #data_collator = DataCollatorWithPadding(tokenizer, pad_to_multiple_of=8)
-    data_collator = DataCollatorWithPadding(tokenizer, max_length=cfg.tokenizer.max_length, padding="max_length")
+    # data_collator = DataCollatorWithPadding(tokenizer, pad_to_multiple_of=8)
+    data_collator = DataCollatorWithPadding(
+        tokenizer, max_length=cfg.tokenizer.max_length, padding="max_length"
+    )
 
     # Get the dtype for the pad_mask (so attention mask has correct dtype for mixed precision)
     dtype_pad_mask = torch.float32
@@ -357,13 +421,26 @@ def trainer(cfg: DictConfig):
     def collate_fn(batch):
         batch = data_collator(batch)
         # Convert attention_mask to pad mask expected by model (0 -> -inf, 1 -> 0.0)
-        batch["attention_mask"] = torch.where(batch["attention_mask"] == 1, float(0.0), float("-inf")).type(dtype_pad_mask)
+        batch["attention_mask"] = torch.where(
+            batch["attention_mask"] == 1, float(0.0), float("-inf")
+        ).type(dtype_pad_mask)
         return batch
 
-    train_dataloader = DataLoader(train_dataset, shuffle=True, collate_fn=collate_fn, batch_size=cfg.trainer.train_batch_size)
-    eval_dataloader = DataLoader(eval_dataset, collate_fn=collate_fn, batch_size=cfg.trainer.eval_batch_size)
+    train_dataloader = DataLoader(
+        train_dataset,
+        shuffle=True,
+        collate_fn=collate_fn,
+        batch_size=cfg.trainer.train_batch_size,
+    )
+    eval_dataloader = DataLoader(
+        eval_dataset, collate_fn=collate_fn, batch_size=cfg.trainer.eval_batch_size
+    )
     if cfg.task == "mnli":
-        mm_eval_dataloader = DataLoader(mm_eval_dataset, collate_fn=collate_fn, batch_size=cfg.trainer.eval_batch_size)
+        mm_eval_dataloader = DataLoader(
+            mm_eval_dataset,
+            collate_fn=collate_fn,
+            batch_size=cfg.trainer.eval_batch_size,
+        )
 
     # Model
     # NOTE: specialised heads (classification heads) are attached to the backbone here:
@@ -388,7 +465,7 @@ def trainer(cfg: DictConfig):
                 trust_remote_code=True,
                 ignore_mismatched_sizes=False,
             )
-            #model = NomicBERTForSequenceClassification(
+            # model = NomicBERTForSequenceClassification(
             #     config,
             #     base_model.bert,
             #     num_labels=num_labels,
@@ -406,7 +483,9 @@ def trainer(cfg: DictConfig):
             )
     else:
         model = NeoBERTForSequenceClassification(
-            NeoBERTConfig(**model_pretraining_config.model, **model_pretraining_config.tokenizer),
+            NeoBERTConfig(
+                **model_pretraining_config.model, **model_pretraining_config.tokenizer
+            ),
             num_labels=num_labels,
             classifier_dropout=cfg.model.classifier_dropout,
             classifier_init_range=cfg.model.classifier_init_range,
@@ -416,32 +495,49 @@ def trainer(cfg: DictConfig):
         if not task_to_transfer_from:
             raise ValueError(f"Task to transfer from for {cfg.task} is not set.")
         cfg.model.pretrained_checkpoint_dir, checkpoint_list = get_best_checkpoint_path(
-            os.path.join(cfg.model.pretrained_checkpoint_dir,"glue",task_to_transfer_from), task_to_transfer_from
+            os.path.join(
+                cfg.model.pretrained_checkpoint_dir, "glue", task_to_transfer_from
+            ),
+            task_to_transfer_from,
         )
         cfg.model.pretrained_checkpoint = checkpoint_list[-1]
-        logger.info(f"Transfering from: {cfg.model.pretrained_checkpoint_dir}, {cfg.model.pretrained_checkpoint}")
-        if not cfg.model.pretrained_checkpoint_dir or not cfg.model.pretrained_checkpoint:
+        logger.info(
+            f"Transfering from: {cfg.model.pretrained_checkpoint_dir}, {cfg.model.pretrained_checkpoint}"
+        )
+        if (
+            not cfg.model.pretrained_checkpoint_dir
+            or not cfg.model.pretrained_checkpoint
+        ):
             raise ValueError("Unable to retrieve checkpoint to transfer from.")
 
     else:
         pass
         # cfg.model.pretrained_checkpoint_dir = os.path.join(cfg.model.pretrained_checkpoint_dir, "model_checkpoints")
 
-    if not cfg.model.from_hub: 
-        state_dict_path = os.path.join(cfg.model.pretrained_checkpoint_dir, "model_checkpoints",str(cfg.model.pretrained_checkpoint),"state_dict.pt")
-        neobert_state_dict = torch.load(state_dict_path, map_location="cpu")#load to cpu before training
+    if not cfg.model.from_hub:
+        state_dict_path = os.path.join(
+            cfg.model.pretrained_checkpoint_dir,
+            "model_checkpoints",
+            str(cfg.model.pretrained_checkpoint),
+            "state_dict.pt",
+        )
+        neobert_state_dict = torch.load(
+            state_dict_path, map_location="cpu"
+        )  # load to cpu before training
 
         # Fix keys: strip "_orig_mod." if present
         new_state_dict = {}
         for k, v in neobert_state_dict.items():
             if k.startswith("_orig_mod."):
-                new_state_dict[k[len("_orig_mod."):]] = v
-            if "decoder" in k: # skip decoder weights from the LM head
+                new_state_dict[k[len("_orig_mod.") :]] = v
+            if "decoder" in k:  # skip decoder weights from the LM head
                 continue
             else:
                 new_state_dict[k] = v
 
-        model.load_state_dict(new_state_dict, strict=False)#strict False to ignore missing keys for classifier and randomly initialise the classifier weights
+        model.load_state_dict(
+            new_state_dict, strict=False
+        )  # strict False to ignore missing keys for classifier and randomly initialise the classifier weights
         # this is using deepseed
         # try:
         #     model = load_state_dict_from_zero_checkpoint(
@@ -459,11 +555,19 @@ def trainer(cfg: DictConfig):
     no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
         {
-            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if not any(nd in n for nd in no_decay)
+            ],
             "weight_decay": cfg.optimizer.hparams.weight_decay,
         },
         {
-            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if any(nd in n for nd in no_decay)
+            ],
             "weight_decay": 0.0,
         },
     ]
@@ -471,21 +575,33 @@ def trainer(cfg: DictConfig):
 
     # Scheduler and math around the number of training steps.
     overrode_max_train_steps = False
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / cfg.trainer.gradient_accumulation_steps)
+    num_update_steps_per_epoch = math.ceil(
+        len(train_dataloader) / cfg.trainer.gradient_accumulation_steps
+    )
     if cfg.trainer.max_steps is None:
-        cfg.trainer.max_steps = cfg.trainer.num_train_epochs * num_update_steps_per_epoch
+        cfg.trainer.max_steps = (
+            cfg.trainer.num_train_epochs * num_update_steps_per_epoch
+        )
         overrode_max_train_steps = True
 
     if cfg.scheduler.warmup_percent is not None:
         if cfg.scheduler.warmup_steps is not None:
-            UserWarning("Overrinding number of warmup steps based on warmup percentage.")
-        cfg.scheduler.warmup_steps = math.ceil(cfg.trainer.max_steps / 100 * cfg.scheduler.warmup_percent)
+            UserWarning(
+                "Overrinding number of warmup steps based on warmup percentage."
+            )
+        cfg.scheduler.warmup_steps = math.ceil(
+            cfg.trainer.max_steps / 100 * cfg.scheduler.warmup_percent
+        )
     if cfg.scheduler.decay_percent is not None:
         if cfg.scheduler.decay_steps is not None:
             UserWarning("Overrinding number of decay steps based on decay percentage.")
-        cfg.scheduler.decay_steps = math.ceil(cfg.trainer.max_steps / 100 * cfg.scheduler.decay_percent)
+        cfg.scheduler.decay_steps = math.ceil(
+            cfg.trainer.max_steps / 100 * cfg.scheduler.decay_percent
+        )
 
-    scheduler = get_scheduler(optimizer=optimizer, lr=cfg.optimizer.hparams.lr, **cfg.scheduler)
+    scheduler = get_scheduler(
+        optimizer=optimizer, lr=cfg.optimizer.hparams.lr, **cfg.scheduler
+    )
 
     cfg.scheduler.warmup_steps = 50
     cfg.scheduler.decay_steps = 50
@@ -493,25 +609,39 @@ def trainer(cfg: DictConfig):
     print(" scheduler decay steps:", cfg.scheduler.decay_steps)
 
     # Prepare everything with our `accelerator`.
-    model, optimizer, train_dataloader, eval_dataloader, scheduler = accelerator.prepare(
-        model, optimizer, train_dataloader, eval_dataloader, scheduler
+    model, optimizer, train_dataloader, eval_dataloader, scheduler = (
+        accelerator.prepare(
+            model, optimizer, train_dataloader, eval_dataloader, scheduler
+        )
     )
 
     if cfg.task == "mnli":
         mm_eval_dataloader = accelerator.prepare(mm_eval_dataloader)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / cfg.trainer.gradient_accumulation_steps)
+    num_update_steps_per_epoch = math.ceil(
+        len(train_dataloader) / cfg.trainer.gradient_accumulation_steps
+    )
     if overrode_max_train_steps:
-        cfg.trainer.max_steps = cfg.trainer.num_train_epochs * num_update_steps_per_epoch
+        cfg.trainer.max_steps = (
+            cfg.trainer.num_train_epochs * num_update_steps_per_epoch
+        )
     # Afterwards we recalculate our number of training epochs
-    cfg.trainer.num_train_epochs = math.ceil(cfg.trainer.max_steps / num_update_steps_per_epoch)
+    cfg.trainer.num_train_epochs = math.ceil(
+        cfg.trainer.max_steps / num_update_steps_per_epoch
+    )
 
     # Overwrite the number of steps performed between evaluation based on the dataset size.
-    cfg.trainer.eval_steps = min(cfg.trainer.eval_steps, len(train_dataset) // cfg.trainer.train_batch_size)
+    cfg.trainer.eval_steps = min(
+        cfg.trainer.eval_steps, len(train_dataset) // cfg.trainer.train_batch_size
+    )
 
     # To keep the last n checkpoints before the best model and do k cycles before early stopping, we save the last k+n models
-    if cfg.trainer.max_ckpt is not None and cfg.trainer.max_ckpt > 0 and cfg.trainer.early_stopping > 0:
+    if (
+        cfg.trainer.max_ckpt is not None
+        and cfg.trainer.max_ckpt > 0
+        and cfg.trainer.early_stopping > 0
+    ):
         cfg.trainer.max_ckpt += cfg.trainer.early_stopping
 
     # Get loss function
@@ -521,27 +651,42 @@ def trainer(cfg: DictConfig):
         loss_fct = MSELoss()
 
     # Train!
-    total_batch_size = cfg.trainer.train_batch_size * accelerator.num_processes * cfg.trainer.gradient_accumulation_steps
+    total_batch_size = (
+        cfg.trainer.train_batch_size
+        * accelerator.num_processes
+        * cfg.trainer.gradient_accumulation_steps
+    )
 
     logger.info("***** Running training *****")
     logger.info(f"  Task = {cfg.task}")
     logger.info(f"  Num train examples = {len(train_dataset)}")
     logger.info(f"  Num eval examples = {len(eval_dataset)}")
     logger.info(f"  Num epochs = {cfg.trainer.num_train_epochs}")
-    logger.info(f"  Instantaneous batch size per device = {cfg.trainer.train_batch_size}")
-    logger.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
+    logger.info(
+        f"  Instantaneous batch size per device = {cfg.trainer.train_batch_size}"
+    )
+    logger.info(
+        f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}"
+    )
     logger.info(f"  Learning rate = {cfg.optimizer.hparams.lr}")
-    logger.info(f"  Gradient accumulation steps = {cfg.trainer.gradient_accumulation_steps}")
+    logger.info(
+        f"  Gradient accumulation steps = {cfg.trainer.gradient_accumulation_steps}"
+    )
     logger.info(f"  Total optimization steps = {cfg.trainer.max_steps}")
     logger.info(f"  Evaluation steps = {cfg.trainer.eval_steps}")
     logger.info(f"  Early stopping cycles = {cfg.trainer.early_stopping}")
     # Only show the progress bar once on each machine.
-    progress_bar = tqdm(range(cfg.trainer.max_steps), disable=not accelerator.is_local_main_process)
+    progress_bar = tqdm(
+        range(cfg.trainer.max_steps), disable=not accelerator.is_local_main_process
+    )
     completed_steps = 0
     starting_epoch = 0
     # Potentially load in the weights and states from a previous save
     if cfg.trainer.resume_from_checkpoint:
-        if cfg.trainer.resume_from_checkpoint is not None or cfg.trainer.resume_from_checkpoint != "":
+        if (
+            cfg.trainer.resume_from_checkpoint is not None
+            or cfg.trainer.resume_from_checkpoint != ""
+        ):
             accelerator.print(f"Resumed from checkpoint: {cfg.trainer.checkpoint_dir}")
             accelerator.load_state(cfg.trainer.checkpoint_dir)
             path = os.path.basename(cfg.trainer.checkpoint_dir)
@@ -549,7 +694,9 @@ def trainer(cfg: DictConfig):
             # Get the most recent checkpoint
             dirs = [f.name for f in os.scandir(os.getcwd()) if f.is_dir()]
             dirs.sort(key=os.path.getctime)
-            path = dirs[-1]  # Sorts folders by date modified, most recent checkpoint is the last
+            path = dirs[
+                -1
+            ]  # Sorts folders by date modified, most recent checkpoint is the last
         # Extract `epoch_{i}` or `step_{i}`
         training_difference = os.path.splitext(path)[0]
 
@@ -559,7 +706,10 @@ def trainer(cfg: DictConfig):
             completed_steps = starting_epoch * num_update_steps_per_epoch
         else:
             # need to multiply `gradient_accumulation_steps` to reflect real steps
-            resume_step = int(training_difference.replace("step_", "")) * cfg.trainer.gradient_accumulation_steps
+            resume_step = (
+                int(training_difference.replace("step_", ""))
+                * cfg.trainer.gradient_accumulation_steps
+            )
             starting_epoch = resume_step // len(train_dataloader)
             resume_step -= starting_epoch * len(train_dataloader)
             completed_steps = resume_step // cfg.gradient_accumulation_step
@@ -578,7 +728,6 @@ def trainer(cfg: DictConfig):
     for epoch in range(starting_epoch, cfg.trainer.num_train_epochs):
         for batch in train_dataloader:
 
-
             logits = model(batch["input_ids"], batch["attention_mask"])["logits"]
 
             if not is_regression:
@@ -590,7 +739,11 @@ def trainer(cfg: DictConfig):
                     loss = loss_fct(logits, batch["labels"])
 
             # Compute train accuracy
-            predictions = logits.argmax(dim=-1) if not is_regression else (logits.squeeze() if logits.size() != torch.Size([1]) else logits)
+            predictions = (
+                logits.argmax(dim=-1)
+                if not is_regression
+                else (logits.squeeze() if logits.size() != torch.Size([1]) else logits)
+            )
             predictions, references = accelerator.gather((predictions, batch["labels"]))
 
             # print(logits, loss)
@@ -615,7 +768,9 @@ def trainer(cfg: DictConfig):
             if completed_steps % 10 == 0:
                 train_metric = metric.compute()
                 if len(train_metric) > 1:
-                    train_metric["combined_score"] = np.mean(list(train_metric.values())).item()
+                    train_metric["combined_score"] = np.mean(
+                        list(train_metric.values())
+                    ).item()
 
                 model.eval()
                 eval_metric = get_evaluation(
@@ -631,7 +786,9 @@ def trainer(cfg: DictConfig):
 
                 logger.info(f"step {completed_steps} eval metric: {eval_metric}")
                 logger.info(f"step {completed_steps} train metric: {train_metric}")
-                logger.info(f"step {completed_steps} train loss: {total_loss / completed_steps}")
+                logger.info(
+                    f"step {completed_steps} train loss: {total_loss / completed_steps}"
+                )
 
                 if cfg.task == "mnli":
                     # Evaluation on matched MNLI
@@ -651,7 +808,9 @@ def trainer(cfg: DictConfig):
                     results["accuracy_mm"] = mm_eval_metric["accuracy"]
 
                     res_mm = results["accuracy_mm"]
-                    logger.info(f"step {completed_steps} eval metric mismatched: {res_mm}")
+                    logger.info(
+                        f"step {completed_steps} eval metric mismatched: {res_mm}"
+                    )
 
                 accelerator.log(
                     {
@@ -672,8 +831,16 @@ def trainer(cfg: DictConfig):
                 # with open(os.path.join(cfg.trainer.dir, f"all_results_step_{completed_steps}.json"), "w") as f:
                 #     print("dumping in", os.path.join(cfg.trainer.dir, f"all_results_step_{completed_steps}.json"))
                 #     json.dump(all_results, f)
-                with open(os.path.join(model_dir, f"all_results_step_{completed_steps}.json"), "w") as f:
-                    print("dumping in", os.path.join(model_dir, f"all_results_step_{completed_steps}.json"))
+                with open(
+                    os.path.join(model_dir, f"all_results_step_{completed_steps}.json"),
+                    "w",
+                ) as f:
+                    print(
+                        "dumping in",
+                        os.path.join(
+                            model_dir, f"all_results_step_{completed_steps}.json"
+                        ),
+                    )
                     json.dump(all_results, f)
 
                 curr_accuracy = list(eval_metric.values())[0]
@@ -686,7 +853,10 @@ def trainer(cfg: DictConfig):
                 else:
                     early_stopping_counter += 1
 
-                if cfg.trainer.early_stopping > 0 and early_stopping_counter >= cfg.trainer.early_stopping:
+                if (
+                    cfg.trainer.early_stopping > 0
+                    and early_stopping_counter >= cfg.trainer.early_stopping
+                ):
                     print(
                         f"Evaluation accuracy has not improved in {cfg.trainer.early_stopping} cycles of {cfg.trainer.eval_steps} evaluation steps, stopping the training."
                     )
@@ -694,7 +864,9 @@ def trainer(cfg: DictConfig):
 
                 # Save model checkpoint
                 if cfg.trainer.max_ckpt != 0:
-                    save_checkpoint(cfg, model, accelerator, completed_steps, model_checkpoint_dir)
+                    save_checkpoint(
+                        cfg, model, accelerator, completed_steps, model_checkpoint_dir
+                    )
 
                 model.train()
 
@@ -730,6 +902,7 @@ def trainer(cfg: DictConfig):
     with open(os.path.join(model_dir, "all_results.json"), "w") as f:
         json.dump(all_results, f)
 
+
 # torch.Size([8, 64]) for batch["input_ids"] means:
 #   - 8: batch size (number of sequences in the batch, usually = batch_size)
 #   - 64: sequence length (number of tokens per sequence, usually = max_length or padding length)
@@ -745,5 +918,3 @@ def trainer(cfg: DictConfig):
 # This tensor is used to apply rotary positional embeddings to the query/key tensors in attention.
 # The assertion error you saw means that the sequence length in your batch did not match the first dimension of freqs_cis.
 # Padding all batches to a fixed max_length ensures this shape match.
-
-

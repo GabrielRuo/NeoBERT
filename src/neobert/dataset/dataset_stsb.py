@@ -2,7 +2,7 @@ import os
 from transformers import PreTrainedTokenizerFast
 from huggingface_hub import hf_hub_download
 
-from datasets import load_dataset,load_from_disk, Dataset
+from datasets import load_dataset, load_from_disk, Dataset
 from typing import Optional, Any
 import logging
 
@@ -12,7 +12,7 @@ from neobert.tokenizer import get_tokenizer, tokenize
 
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)#not sure why
+logging.basicConfig(level=logging.INFO)  # not sure why
 
 
 def get_dataset_path(dataset_name: str, num_samples: Optional[int]) -> Path:
@@ -21,7 +21,7 @@ def get_dataset_path(dataset_name: str, num_samples: Optional[int]) -> Path:
     cache_root = base_dir / ".pathways_cache"
     cache_root.mkdir(parents=True, exist_ok=True)
 
-    dataset_key = ''.join(c for c in dataset_name if c.isalnum()).lower()
+    dataset_key = "".join(c for c in dataset_name if c.isalnum()).lower()
     if num_samples is None:
         return cache_root / f"{dataset_key}"
     else:
@@ -61,6 +61,7 @@ def prepare_and_cache_stsb(tokenizer, cache_dir: Optional[str] = None):
         tokenized_stsb[split].save_to_disk(cache_dir / split)
     logger.info(f"Tokenized STSB saved to {cache_dir}")
 
+
 def load_cached_stsb(cache_dir: Optional[str] = None) -> dict:
     """
     Load cached tokenized STSB splits from disk.
@@ -92,7 +93,7 @@ def get_dataset(
 ) -> Dataset:
     """
     Load and cache a Hugging Face dataset for efficient reuse.
-    
+
     Args:
         dataset_name (str): Dataset identifier on Hugging Face.
         split (str): Dataset split, usually "train".
@@ -102,15 +103,14 @@ def get_dataset(
     Returns:
         Dataset: The loaded dataset, formatted for PyTorch.
     """
-    #assert not streaming, "Streaming mode is not supported with caching"
+    # assert not streaming, "Streaming mode is not supported with caching"
 
     dataset_name = hf_path + (f"_{subset}" if subset else "") + "_" + split
     if num_samples is None:
         logger.info(f"loading full dataset from {hf_path} ...")
         dataset_path = get_dataset_path(dataset_name, num_samples)
-    else: 
+    else:
         dataset_path = get_dataset_path(dataset_name, num_samples)
-
 
     if dataset_path.exists():
         logger.info(f"Loading cached dataset from: {dataset_path}")
@@ -122,17 +122,26 @@ def get_dataset(
             else:
                 dataset = load_dataset(hf_path, split=split, streaming=False)
         else:
-            logger.info(f"Downloading and caching {hf_path} with {num_samples} samples...")
+            logger.info(
+                f"Downloading and caching {hf_path} with {num_samples} samples..."
+            )
             if subset:
-                dataset = load_dataset(hf_path, subset, split=f"{split}[:{num_samples}]", streaming=False)
+                dataset = load_dataset(
+                    hf_path, subset, split=f"{split}[:{num_samples}]", streaming=False
+                )
             else:
-                dataset = load_dataset(hf_path, split=f"{split}[:{num_samples}]", streaming=False)
-        #tokenize
+                dataset = load_dataset(
+                    hf_path, split=f"{split}[:{num_samples}]", streaming=False
+                )
+        # tokenize
         tokenizer = get_tokenizer(**cfg.tokenizer)
-        dataset = tokenize(dataset, tokenizer, column_name=cfg.dataset.column, **cfg.tokenizer)
+        dataset = tokenize(
+            dataset, tokenizer, column_name=cfg.dataset.column, **cfg.tokenizer
+        )
         dataset.save_to_disk(dataset_path)
 
     return dataset
+
 
 splits = load_cached_stsb()
 train_ds = splits["train"]

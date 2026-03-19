@@ -142,6 +142,57 @@ PREDICT_ROUTING_E2E_OVERRIDES="saved_model.checkpoint=mop_100" RUN_EXTERNAL_E2E=
 - Daily scheduled: `RUN_EXTERNAL_TESTS=1 pytest tests/test_external_connectivity.py -q`
 - Nightly or pre-release: `RUN_EXTERNAL_E2E=1 pytest tests/test_external_e2e.py -q -m "external and e2e"`
 
+### 4) Full offline E2E tests (slow, opt-in, local assets only)
+
+Runs real script entrypoints end-to-end in offline mode for both:
+
+- predict-routing pipeline (`scripts/analyses/predict_routing.py`)
+- pretraining pipeline (`scripts/pretraining/pretrain.py`)
+
+```bash
+RUN_OFFLINE_E2E=1 pytest tests/test_offline_e2e.py -q -m "local and e2e"
+```
+
+Host one-liner:
+
+```bash
+docker compose exec modal-like bash -lc "cd /workspace && RUN_OFFLINE_E2E=1 pytest tests/test_offline_e2e.py -q -m 'local and e2e'"
+```
+
+Predict-routing offline E2E env vars:
+
+- `PREDICT_ROUTING_OFFLINE_E2E_BASE_PATH` (default: `/runs/logs/checkpoints/mop_2025-12-02_16-36-59/`)
+- `PREDICT_ROUTING_OFFLINE_E2E_CHECKPOINT` (default: `40000`)
+- `PREDICT_ROUTING_OFFLINE_E2E_TRAIN_DATASET_PATH` (default: `/data/.pathways_cache/jeankaddourminipiletrain_100`)
+- `PREDICT_ROUTING_OFFLINE_E2E_TEST_DATASET_PATH` (default: same as train dataset path)
+- `PREDICT_ROUTING_OFFLINE_E2E_TIMEOUT` (default: `3600` seconds)
+- `PREDICT_ROUTING_OFFLINE_E2E_SCRIPT` (default: `scripts/analyses/predict_routing.py`)
+- `PREDICT_ROUTING_OFFLINE_E2E_OVERRIDES` (space-separated Hydra overrides)
+
+Pretraining offline E2E env vars:
+
+- `PRETRAIN_OFFLINE_E2E_SCRIPT` (default: `scripts/pretraining/pretrain.py`)
+- `PRETRAIN_OFFLINE_E2E_TIMEOUT` (default: `3600` seconds)
+- `PRETRAIN_OFFLINE_E2E_TOKENIZER` (default: `google-bert/bert-base-uncased`, must exist in local cache)
+- `PRETRAIN_OFFLINE_E2E_OVERRIDES` (space-separated Hydra overrides)
+
+Predict-routing example with custom local assets:
+
+```bash
+PREDICT_ROUTING_OFFLINE_E2E_BASE_PATH=/runs/logs/checkpoints/my_run \
+PREDICT_ROUTING_OFFLINE_E2E_CHECKPOINT=latest \
+PREDICT_ROUTING_OFFLINE_E2E_TRAIN_DATASET_PATH=/data/my_train_ds \
+PREDICT_ROUTING_OFFLINE_E2E_TEST_DATASET_PATH=/data/my_test_ds \
+RUN_OFFLINE_E2E=1 pytest tests/test_offline_e2e.py -q
+```
+
+Pretraining example with custom overrides:
+
+```bash
+PRETRAIN_OFFLINE_E2E_OVERRIDES="model.hidden_size=16 model.num_hidden_layers=2" \
+RUN_OFFLINE_E2E=1 pytest tests/test_offline_e2e.py -q
+```
+
 ### Pytest markers
 
 The test suite uses these markers:

@@ -1,0 +1,13 @@
+name: minipile_tiny_local
+column: text
+path_to_disk: /data/minipile_tiny
+train:
+  hf_path: /data/minipile_tiny
+  split: train
+  num_samples: null
+  streaming: False
+test:
+  hf_path: /data/minipile_tiny
+  split: test
+  num_samples: null
+  streaming: False

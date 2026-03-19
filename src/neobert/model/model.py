@@ -549,6 +549,10 @@ class EncoderBlock(nn.Module):
         if self.config.rope:
             xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
 
+        # Cast pad_mask to match query dtype to avoid mixed precision dtype mismatches
+        if pad_mask is not None:
+            pad_mask = pad_mask.to(xq.dtype)
+
         # Input and output are of dimension (B, H, M, K)
         attn = scaled_dot_product_attention(
             query=xq.transpose(1, 2),

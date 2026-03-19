@@ -14,16 +14,13 @@ TIMEOUT = 24 * 60 * 60  # one day
 
 app = modal.App("neobert")
 
-#use os.getenv to get the secrets from the environment variables that were loaded from the .env file.       
+# use os.getenv to get the secrets from the environment variables that were loaded from the .env file.
 hf_token = os.getenv("HF_TOKEN")
-wandb_api_key = os.getenv("WANDB_API_KEY")  
+wandb_api_key = os.getenv("WANDB_API_KEY")
 
 # Pass it to Modal
-huggingface_secret = modal.Secret.from_dict({
-    "HF_TOKEN": hf_token
-})
-wandb_secret = modal.Secret.from_dict({
-    "WANDB_API_KEY": wandb_api_key})
+huggingface_secret = modal.Secret.from_dict({"HF_TOKEN": hf_token})
+wandb_secret = modal.Secret.from_dict({"WANDB_API_KEY": wandb_api_key})
 
 
 # experiment_image = (
@@ -52,12 +49,11 @@ experiment_image = (
 )
 
 
-
 runs_volume = modal.Volume.from_name("neobert-runs", create_if_missing=True)
 training_data_volume = modal.Volume.from_name(
     "neobert-training-data", create_if_missing=True
 )
-#config_volume = modal.Volume.from_name("neobert-config", create_if_missing=True)
+# config_volume = modal.Volume.from_name("neobert-config", create_if_missing=True)
 
 # config_volume = modal.Mount.from_local_dir(
 #     "../../conf",  # Local path on your machine
@@ -66,17 +62,19 @@ training_data_volume = modal.Volume.from_name(
 
 
 # with experiment_image.imports():
-#     from neobert.pretraining import trainer 
+#     from neobert.pretraining import trainer
 #     from hydra import initialize, compose
-     
+
 
 @app.function(
     image=experiment_image,
     secrets=[wandb_secret, huggingface_secret],
-    gpu="T4", # SWITCH TO T4 if want cheaper
-    volumes={"/data": training_data_volume, "/runs": runs_volume,
-             #"/conf": config_volume,
-             },
+    gpu="T4",  # SWITCH TO T4 if want cheaper
+    volumes={
+        "/data": training_data_volume,
+        "/runs": runs_volume,
+        # "/conf": config_volume,
+    },
     timeout=TIMEOUT,
 )
 # def run_pretrain(args: list[str]) -> None:
@@ -92,13 +90,16 @@ def run_pretrain(overrides: list[str], model_type: str) -> None:
         cfg = compose(config_name=config_name, overrides=overrides)
         trainer(cfg)
 
+
 @app.function(
     image=experiment_image,
     secrets=[wandb_secret, huggingface_secret],
     gpu="T4",
-    volumes={"/data": training_data_volume, "/runs": runs_volume,
-             #"/conf": config_volume,
-             },
+    volumes={
+        "/data": training_data_volume,
+        "/runs": runs_volume,
+        # "/conf": config_volume,
+    },
     timeout=TIMEOUT,
 )
 def run_predictor(overrides: list[str]) -> None:
@@ -111,13 +112,16 @@ def run_predictor(overrides: list[str]) -> None:
         cfg_predictor = compose(config_name=config_name, overrides=overrides)
         predictor(cfg_predictor)
 
+
 @app.function(
     image=experiment_image,
     secrets=[wandb_secret, huggingface_secret],
     gpu="T4",
-    volumes={"/data": training_data_volume, "/runs": runs_volume,
-             #"/conf": config_volume,
-             },
+    volumes={
+        "/data": training_data_volume,
+        "/runs": runs_volume,
+        # "/conf": config_volume,
+    },
     timeout=TIMEOUT,
 )
 def run_pathways_analysis(overrides: list[str]) -> None:
@@ -130,13 +134,16 @@ def run_pathways_analysis(overrides: list[str]) -> None:
         cfg_predictor = compose(config_name=config_name, overrides=overrides)
         pathways_analysis(cfg_predictor)
 
+
 @app.function(
     image=experiment_image,
     secrets=[wandb_secret, huggingface_secret],
     gpu="T4",
-    volumes={"/data": training_data_volume, "/runs": runs_volume,
-             #"/conf": config_volume,
-             },
+    volumes={
+        "/data": training_data_volume,
+        "/runs": runs_volume,
+        # "/conf": config_volume,
+    },
     timeout=TIMEOUT,
 )
 def run_difficulty(overrides: list[str]) -> None:
@@ -149,39 +156,50 @@ def run_difficulty(overrides: list[str]) -> None:
         cfg_dif = compose(config_name=config_name, overrides=overrides)
         measure_difficulty(cfg_dif)
 
+
 @app.function(
     image=experiment_image,
     secrets=[wandb_secret, huggingface_secret],
     gpu="T4",
-    volumes={"/data": training_data_volume, "/runs": runs_volume,
-             #"/conf": config_volume,
-             },
+    volumes={
+        "/data": training_data_volume,
+        "/runs": runs_volume,
+        # "/conf": config_volume,
+    },
     timeout=TIMEOUT,
 )
 def run_correlations() -> None:
     from neobert.correlations import compute_correlations_across_list_of_models
+
     compute_correlations_across_list_of_models()
+
 
 @app.function(
     image=experiment_image,
     secrets=[wandb_secret, huggingface_secret],
     gpu="T4",
-    volumes={"/data": training_data_volume, "/runs": runs_volume,
-             #"/conf": config_volume,
-             },
+    volumes={
+        "/data": training_data_volume,
+        "/runs": runs_volume,
+        # "/conf": config_volume,
+    },
     timeout=TIMEOUT,
 )
 def run_analyses_pretrained() -> None:
     from neobert.analysis.analyse_pretrained import analyse_list_of_pretrained_models
+
     analyse_list_of_pretrained_models()
+
 
 @app.function(
     image=experiment_image,
     secrets=[wandb_secret, huggingface_secret],
     gpu="T4",
-    volumes={"/data": training_data_volume, "/runs": runs_volume,
-             #"/conf": config_volume,
-             },
+    volumes={
+        "/data": training_data_volume,
+        "/runs": runs_volume,
+        # "/conf": config_volume,
+    },
     timeout=TIMEOUT,
 )
 def run_pretrain_sweep(overrides: list[str], model_type: str) -> None:
@@ -194,8 +212,10 @@ def run_pretrain_sweep(overrides: list[str], model_type: str) -> None:
         cfg = compose(config_name=config_name, overrides=overrides)
         with open("conf/sweeps/sweep.yaml") as f:
             sweep_cfg = yaml.safe_load(f)
+
         def sweep_main():
             train_and_eval_sweep(cfg)
+
         sweep_id = wandb.sweep(sweep=sweep_cfg, project="MoP")
         wandb.agent(sweep_id=sweep_id, function=sweep_main, count=3)
 
@@ -204,9 +224,11 @@ def run_pretrain_sweep(overrides: list[str], model_type: str) -> None:
     image=experiment_image,
     secrets=[wandb_secret, huggingface_secret],
     gpu="T4",
-    volumes={"/data": training_data_volume, "/runs": runs_volume,
-             #"/conf": config_volume,
-             },
+    volumes={
+        "/data": training_data_volume,
+        "/runs": runs_volume,
+        # "/conf": config_volume,
+    },
     timeout=TIMEOUT,
 )
 def run_glue(overrides: list[str]) -> None:
@@ -219,7 +241,8 @@ def run_glue(overrides: list[str]) -> None:
         cfg_glue = compose(config_name=config_name, overrides=overrides)
         trainer(cfg_glue)
 
-@app.function(image=experiment_image,volumes={"/runs": runs_volume})
+
+@app.function(image=experiment_image, volumes={"/runs": runs_volume})
 def delete_in_volume(remote_dir: str):
     path = Path("/runs") / remote_dir
     if path.exists():
@@ -233,9 +256,11 @@ def delete_in_volume(remote_dir: str):
     image=experiment_image,
     secrets=[wandb_secret, huggingface_secret],
     gpu="T4",
-    volumes={"/data": training_data_volume, "/runs": runs_volume,
-             #"/conf": config_volume,
-             },
+    volumes={
+        "/data": training_data_volume,
+        "/runs": runs_volume,
+        # "/conf": config_volume,
+    },
     timeout=TIMEOUT,
 )
 def run_pretrained_model_tester(overrides: list[str]) -> None:
@@ -247,5 +272,3 @@ def run_pretrained_model_tester(overrides: list[str]) -> None:
         config_name = "tester"
         cfg_tester = compose(config_name=config_name, overrides=overrides)
         pretrained_model_tester(cfg_tester)
-
-        

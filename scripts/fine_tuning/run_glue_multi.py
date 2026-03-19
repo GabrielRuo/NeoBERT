@@ -36,9 +36,10 @@ from neobert.modal_runner import app, run_glue
 # schedule_list = [2500000]
 # cost_exponent_list = [2]
 import numpy as np
-alpha_end_list = list(np.array([4e-7,4e-8,4e-9,4e-10]))
-alpha_load_balancing_list = list(np.array([1e-3,1e-2,1e-1]))
-#alpha_end_list = list(np.array([0.0,5e-9,8e-9,2e-8,4e-8,7e-8,9e-8,2e-7,4e-7,6e-7,8e-7,1e-6,5e-6,1e-5])/5)
+
+alpha_end_list = list(np.array([4e-7, 4e-8, 4e-9, 4e-10]))
+alpha_load_balancing_list = list(np.array([1e-3, 1e-2, 1e-1]))
+# alpha_end_list = list(np.array([0.0,5e-9,8e-9,2e-8,4e-8,7e-8,9e-8,2e-7,4e-7,6e-7,8e-7,1e-6,5e-6,1e-5])/5)
 # alpha_scaling_list = [0.0]
 # schedule_list = [2500000]
 # cost_exponent_list = [2]
@@ -48,8 +49,6 @@ alpha_load_balancing_list = list(np.array([1e-3,1e-2,1e-1]))
 # alpha_scaling_list = [0.0]
 # schedule_list = [2500000]
 # cost_exponent_list = [2]
-
-
 
 
 # ------------------------------------------------
@@ -63,16 +62,14 @@ def run_many(cli_overrides_base):
                 overrides = cli_overrides_base + [
                     f"model.loss.cost_based_loss_alpha_end={alpha_end}",
                     f"model.loss.load_balancing_loss_coeff={alpha_load_balancing}",
-                    ]
+                ]
                 print(
                     f"Launching run: "
                     f"alpha_end={alpha_end}, "
                     f"alpha_load_balancing={alpha_load_balancing}"
                 )
                 # non-blocking launch
-                fut = run_glue.spawn(
-                    overrides=overrides
-                )
+                fut = run_glue.spawn(overrides=overrides)
                 futures.append(fut)
 
         # (Optional) wait for results
