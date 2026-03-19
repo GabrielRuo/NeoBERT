@@ -6,9 +6,11 @@ cli_overrides = sys.argv[1:]
 
 def difficulty_modal(cli_overrides: list[str]) -> None:
     import modal
-    from neobert.modal_runner import app,run_difficulty
+    from neobert.modal_runner import app, run_difficulty
+
     with modal.enable_output(), app.run(detach=True):
         run_difficulty.remote(overrides=cli_overrides)
+
 
 if __name__ == "__main__":
     if modal == True:
@@ -16,17 +18,11 @@ if __name__ == "__main__":
         difficulty_modal(cli_overrides)
     else:
         print("Running in local environment")
-        
+
         from neobert.difficulty import measure_difficulty
         from hydra import initialize, compose
+
         with initialize(config_path="../../conf", version_base=None):
             config_name = "difficulty"
             cfg_dif = compose(config_name=config_name, overrides=cli_overrides)
             measure_difficulty(cfg_dif)
-
-
-
-
-
-
-

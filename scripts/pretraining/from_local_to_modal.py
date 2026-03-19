@@ -8,11 +8,13 @@ import shutil
 import sys
 
 # Local target directory
-local_logs_dir = Path(__file__).parent.parent / 'src' / 'neobert' / 'runs' / 'logs'
+local_logs_dir = Path(__file__).parent.parent / "src" / "neobert" / "runs" / "logs"
 local_logs_dir.mkdir(parents=True, exist_ok=True)
 
 
-def move_runs_logs_from_local_to_modal(local_dir, base_path=base_path, checkpoints=checkpoints):
+def move_runs_logs_from_local_to_modal(
+    local_dir, base_path=base_path, checkpoints=checkpoints
+):
     """
     Move runs and logs from local directory to modal volume.
 
@@ -55,10 +57,9 @@ def move_runs_logs_from_local_to_modal(local_dir, base_path=base_path, checkpoin
                     print(f"Checkpoint {checkpoint} does not exist in {local_run_path}")
 
 
-
 if __name__ == "__main__":
     import modal
-    from neobert.modal_runner import app,move_to_volume
+    from neobert.modal_runner import app, move_to_volume
 
     # Parse key=value arguments from sys.argv
     parser = argparse.ArgumentParser()
@@ -83,12 +84,11 @@ if __name__ == "__main__":
                 checkpoints = value
             else:
                 print(f"Unknown argument: {key}")
-    
 
     with modal.enable_output(), app.run(detach=True):
         move_runs_logs_from_local_to_modal(base_path=base_path, checkpoints=checkpoints)
 
-    #currently I have extraceted the loop from download_runs_logs which throws an error. Will have to correct that
+    # currently I have extraceted the loop from download_runs_logs which throws an error. Will have to correct that
 
-#maintenant: delete le modèle sur modal
-#sauvegarder la config du  run
+# maintenant: delete le modèle sur modal
+# sauvegarder la config du  run

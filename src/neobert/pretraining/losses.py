@@ -1,7 +1,7 @@
-
 import torch
 from typing import Union, Optional, Any, Dict
 from torch.nn import CrossEntropyLoss
+
 
 def load_balancing_loss_fn(
     gate_logits: Union[torch.Tensor, tuple[torch.Tensor], None],
@@ -37,7 +37,9 @@ def load_balancing_loss_fn(
 
     if isinstance(gate_logits, tuple):
         compute_device = gate_logits[0].device
-        concatenated_gate_logits = torch.cat([layer_gate.to(compute_device) for layer_gate in gate_logits], dim=0)
+        concatenated_gate_logits = torch.cat(
+            [layer_gate.to(compute_device) for layer_gate in gate_logits], dim=0
+        )
 
     routing_weights = torch.nn.functional.softmax(concatenated_gate_logits, dim=-1)
 
@@ -52,27 +54,33 @@ def load_balancing_loss_fn(
         # Compute the average probability of routing to these experts
         router_prob_per_expert = torch.mean(routing_weights, dim=0)
     else:
-        attention_mask= torch.where(attention_mask == float(0.0), 1, float(0.0)) #original mask is additive-->1,0
+        attention_mask = torch.where(
+            attention_mask == float(0.0), 1, float(0.0)
+        )  # original mask is additive-->1,0
         # tokens_per_expert = torch.mean(expert_mask.float(), dim=0)
 
         # # Compute the average probability of routing to these experts
         # router_prob_per_expert = torch.mean(routing_weights, dim=0)
-        
+
         batch_size, sequence_length = attention_mask.shape
-        num_hidden_layers = concatenated_gate_logits.shape[0] // (batch_size * sequence_length)
+        num_hidden_layers = concatenated_gate_logits.shape[0] // (
+            batch_size * sequence_length
+        )
 
         # Compute the mask that masks all padding tokens as 0 with the same shape of expert_mask
         expert_attention_mask = (
             attention_mask[None, :, :, None, None]
-            .expand((num_hidden_layers, batch_size, sequence_length, top_k, num_experts))
+            .expand(
+                (num_hidden_layers, batch_size, sequence_length, top_k, num_experts)
+            )
             .reshape(-1, top_k, num_experts)
             .to(compute_device)
         )
 
         # Compute the percentage of tokens routed to each experts
-        tokens_per_expert = torch.sum(expert_mask.float() * expert_attention_mask, dim=0) / torch.sum(
-            expert_attention_mask, dim=0
-        )
+        tokens_per_expert = torch.sum(
+            expert_mask.float() * expert_attention_mask, dim=0
+        ) / torch.sum(expert_attention_mask, dim=0)
 
         # Compute the mask that masks all padding tokens as 0 with the same shape of tokens_per_expert
         router_per_expert_attention_mask = (
@@ -83,12 +91,13 @@ def load_balancing_loss_fn(
         )
 
         # Compute the average probability of routing to these experts
-        router_prob_per_expert = torch.sum(routing_weights * router_per_expert_attention_mask, dim=0) / torch.sum(
-            router_per_expert_attention_mask, dim=0
-        )
+        router_prob_per_expert = torch.sum(
+            routing_weights * router_per_expert_attention_mask, dim=0
+        ) / torch.sum(router_per_expert_attention_mask, dim=0)
 
     overall_loss = torch.sum(tokens_per_expert * router_prob_per_expert.unsqueeze(0))
     return overall_loss * num_experts
+
 
 def hmoe_penalty_loss_fn(
     gate_logits: Union[torch.Tensor, tuple[torch.Tensor], None],
@@ -123,31 +132,46 @@ def hmoe_penalty_loss_fn(
 
     if isinstance(gate_logits, tuple):
         compute_device = gate_logits[0].device
-        concatenated_gate_logits = torch.cat([layer_gate.to(compute_device) for layer_gate in gate_logits], dim=0)
+        concatenated_gate_logits = torch.cat(
+            [layer_gate.to(compute_device) for layer_gate in gate_logits], dim=0
+        )
 
     routing_weights = torch.nn.functional.softmax(concatenated_gate_logits, dim=-1)
-    expert_sizes = torch.tensor([int(size) for size in cfg.model.expert_sizes.split(",")], device=compute_device)
+    expert_sizes = torch.tensor(
+        [int(size) for size in cfg.model.expert_sizes.split(",")], device=compute_device
+    )
 
     if cfg.model.routing_strategy == "top_k":
-        top_k = cfg.model.num_experts_per_tok #if we wanted  to use top_k for heterogeneous moe
+        top_k = (
+            cfg.model.num_experts_per_tok
+        )  # if we wanted  to use top_k for heterogeneous moe
         _, selected_experts = torch.topk(routing_weights, top_k, dim=-1)
 
-        expert_mask = torch.nn.functional.one_hot(selected_experts, num_experts)# n_tokens, top_k, num_experts
-        expert_mask = torch.sum(expert_mask, dim=1) * expert_sizes  # n_tokens, num_experts
+        expert_mask = torch.nn.functional.one_hot(
+            selected_experts, num_experts
+        )  # n_tokens, top_k, num_experts
+        expert_mask = (
+            torch.sum(expert_mask, dim=1) * expert_sizes
+        )  # n_tokens, num_experts
         mean_num_activated_experts = top_k
 
     elif cfg.model.routing_strategy == "top_p":
         top_p = cfg.model.min_expert_cumprob_per_token
-        sorted_weights, sorted_indices = torch.sort(routing_weights, dim=-1, descending=False)
+        sorted_weights, sorted_indices = torch.sort(
+            routing_weights, dim=-1, descending=False
+        )
 
         cum_probs = sorted_weights.cumsum(dim=-1)
         mask = cum_probs > 1 - top_p
 
         unsorted_mask = torch.zeros_like(mask, dtype=torch.bool)
-        expert_mask = unsorted_mask.scatter(dim=-1, index=sorted_indices, src=mask).float()#n_layers*batch_size*seq_len, num_experts
-        mean_num_activated_experts = torch.mean(torch.sum(expert_mask.float(), dim=1), dim=0)
-        expert_mask *= expert_sizes # n_tokens, num_experts
-
+        expert_mask = unsorted_mask.scatter(
+            dim=-1, index=sorted_indices, src=mask
+        ).float()  # n_layers*batch_size*seq_len, num_experts
+        mean_num_activated_experts = torch.mean(
+            torch.sum(expert_mask.float(), dim=1), dim=0
+        )
+        expert_mask *= expert_sizes  # n_tokens, num_experts
 
     if attention_mask is None:
         # Compute the percentage of tokens routed to each experts
@@ -161,23 +185,27 @@ def hmoe_penalty_loss_fn(
         # # Compute the average probability of routing to these experts
         # router_prob_per_expert = torch.mean(routing_weights, dim=0)
 
-        attention_mask= torch.where(attention_mask == float(0.0), 1, float(0.0)) #original mask is additive-->1,0
+        attention_mask = torch.where(
+            attention_mask == float(0.0), 1, float(0.0)
+        )  # original mask is additive-->1,0
 
         batch_size, sequence_length = attention_mask.shape
-        num_hidden_layers = concatenated_gate_logits.shape[0] // (batch_size * sequence_length)
+        num_hidden_layers = concatenated_gate_logits.shape[0] // (
+            batch_size * sequence_length
+        )
 
         # Compute the mask that masks all padding tokens as 0 with the same shape of expert_mask
         expert_attention_mask = (
-            attention_mask[None, :, :,None]
-            .expand((num_hidden_layers, batch_size, sequence_length,num_experts))
+            attention_mask[None, :, :, None]
+            .expand((num_hidden_layers, batch_size, sequence_length, num_experts))
             .reshape(-1, num_experts)
             .to(compute_device)
         )
 
         # Compute the percentage of tokens routed to each experts
-        tokens_per_expert = torch.sum(expert_mask.float() * expert_attention_mask, dim=0) / torch.sum(
-            expert_attention_mask, dim=0
-        )
+        tokens_per_expert = torch.sum(
+            expert_mask.float() * expert_attention_mask, dim=0
+        ) / torch.sum(expert_attention_mask, dim=0)
 
         # Compute the mask that masks all padding tokens as 0 with the same shape of tokens_per_expert
         router_per_expert_attention_mask = (
@@ -186,18 +214,21 @@ def hmoe_penalty_loss_fn(
             .reshape(-1, num_experts)
             .to(compute_device)
         )
-        
+
         # Compute the average probability of routing to these experts
-        router_prob_per_expert = torch.sum(routing_weights * router_per_expert_attention_mask, dim=0) / torch.sum(
-            router_per_expert_attention_mask, dim=0
-        )
+        router_prob_per_expert = torch.sum(
+            routing_weights * router_per_expert_attention_mask, dim=0
+        ) / torch.sum(router_per_expert_attention_mask, dim=0)
 
     overall_loss = torch.sum(tokens_per_expert * router_prob_per_expert.unsqueeze(0))
     return overall_loss * num_experts, mean_num_activated_experts
 
-def hmoe_entropy_loss_fn(gate_logits: Union[torch.Tensor, tuple[torch.Tensor], None], cfg, attention_mask):
 
-    #ATTENTION: I WILL NEED TO ADAPT THIS TO THE CASE WHERE THERE IS AN ATTENTION MASK
+def hmoe_entropy_loss_fn(
+    gate_logits: Union[torch.Tensor, tuple[torch.Tensor], None], cfg, attention_mask
+):
+
+    # ATTENTION: I WILL NEED TO ADAPT THIS TO THE CASE WHERE THERE IS AN ATTENTION MASK
     """
     Computes the entropy loss for the Heterogeneous Mixture of Experts (HMoE) model.
 
@@ -212,25 +243,41 @@ def hmoe_entropy_loss_fn(gate_logits: Union[torch.Tensor, tuple[torch.Tensor], N
     if isinstance(gate_logits, tuple):
         compute_device = gate_logits[0].device
         if attention_mask is None:
-            concatenated_gate_logits = torch.cat([layer_gate.to(compute_device) for layer_gate in gate_logits], dim=0)#n_layers*batch_size*seq_length,num_expert
+            concatenated_gate_logits = torch.cat(
+                [layer_gate.to(compute_device) for layer_gate in gate_logits], dim=0
+            )  # n_layers*batch_size*seq_length,num_expert
         else:
-            concatenated_gate_logits = torch.stack([layer_gate.to(compute_device) for layer_gate in gate_logits], dim=0)#n_layers,batch_size*seq_length,num_experts
-            boolean_pad_mask = (attention_mask.reshape(-1) != float("-inf")).squeeze(-1)#[batch_size*seq_length,num_experts]
-            concatenated_gate_logits = concatenated_gate_logits[:,boolean_pad_mask,:].reshape(-1, concatenated_gate_logits.shape[-1]) #n_layers*batch_size*seq_length,num_expert
+            concatenated_gate_logits = torch.stack(
+                [layer_gate.to(compute_device) for layer_gate in gate_logits], dim=0
+            )  # n_layers,batch_size*seq_length,num_experts
+            boolean_pad_mask = (attention_mask.reshape(-1) != float("-inf")).squeeze(
+                -1
+            )  # [batch_size*seq_length,num_experts]
+            concatenated_gate_logits = concatenated_gate_logits[
+                :, boolean_pad_mask, :
+            ].reshape(
+                -1, concatenated_gate_logits.shape[-1]
+            )  # n_layers*batch_size*seq_length,num_expert
 
-    else: 
-        print("WARNING: gate_logits is not a tuple, this is not supported in the current implementation of entropy loss function. ")
+    else:
+        print(
+            "WARNING: gate_logits is not a tuple, this is not supported in the current implementation of entropy loss function. "
+        )
 
     routing_weights = torch.nn.functional.softmax(concatenated_gate_logits, dim=-1)
 
-
     # Compute the entropy
-    entropy_loss = -torch.sum(routing_weights * torch.log(routing_weights + cfg.model.loss.entropy_loss_epsilon), dim=-1)
+    entropy_loss = -torch.sum(
+        routing_weights
+        * torch.log(routing_weights + cfg.model.loss.entropy_loss_epsilon),
+        dim=-1,
+    )
 
     # Average
     entropy_loss = torch.mean(entropy_loss)
 
-    return entropy_loss 
+    return entropy_loss
+
 
 def hetero_moe_loss_fn(logits, router_logits, cfg, batch):
     """
@@ -245,193 +292,343 @@ def hetero_moe_loss_fn(logits, router_logits, cfg, batch):
     Returns:
         The computed loss.
     """
-    num_experts = len(cfg.model.expert_sizes.split(','))
+    num_experts = len(cfg.model.expert_sizes.split(","))
 
     mlm_loss_fn = CrossEntropyLoss()
-    mlm_loss = mlm_loss_fn(logits.view(-1, cfg.tokenizer.vocab_size), batch["labels"].view(-1))
+    mlm_loss = mlm_loss_fn(
+        logits.view(-1, cfg.tokenizer.vocab_size), batch["labels"].view(-1)
+    )
 
-    penalty_loss,mean_num_activated_experts = hmoe_penalty_loss_fn(router_logits, cfg, num_experts=num_experts, attention_mask=batch.get("attention_mask", None))
+    penalty_loss, mean_num_activated_experts = hmoe_penalty_loss_fn(
+        router_logits,
+        cfg,
+        num_experts=num_experts,
+        attention_mask=batch.get("attention_mask", None),
+    )
 
-    entropy_loss = hmoe_entropy_loss_fn(router_logits,cfg, attention_mask=batch.get("attention_mask", None))
+    entropy_loss = hmoe_entropy_loss_fn(
+        router_logits, cfg, attention_mask=batch.get("attention_mask", None)
+    )
 
-    train_loss = mlm_loss + cfg.model.loss.penalty_loss_coeff * penalty_loss + cfg.model.loss.entropy_loss_coeff * entropy_loss
+    train_loss = (
+        mlm_loss
+        + cfg.model.loss.penalty_loss_coeff * penalty_loss
+        + cfg.model.loss.entropy_loss_coeff * entropy_loss
+    )
 
-    return train_loss,mlm_loss,penalty_loss,entropy_loss, mean_num_activated_experts
+    return train_loss, mlm_loss, penalty_loss, entropy_loss, mean_num_activated_experts
 
 
-def homo_moe_loss_fn(logits,router_logits,cfg, batch):
+def homo_moe_loss_fn(logits, router_logits, cfg, batch):
 
-    num_experts = len(cfg.model.expert_sizes.split(','))
+    num_experts = len(cfg.model.expert_sizes.split(","))
     top_k = cfg.model.num_experts_per_tok_training
 
     mlm_loss_fn = CrossEntropyLoss()
-    mlm_loss = mlm_loss_fn(logits.view(-1, cfg.tokenizer.vocab_size), batch["labels"].view(-1))
-    load_balancing_loss = load_balancing_loss_fn(router_logits, top_k=top_k, num_experts=num_experts, attention_mask=batch.get("attention_mask", None))
+    mlm_loss = mlm_loss_fn(
+        logits.view(-1, cfg.tokenizer.vocab_size), batch["labels"].view(-1)
+    )
+    load_balancing_loss = load_balancing_loss_fn(
+        router_logits,
+        top_k=top_k,
+        num_experts=num_experts,
+        attention_mask=batch.get("attention_mask", None),
+    )
 
-    train_loss = mlm_loss + cfg.model.loss.load_balancing_loss_coeff * load_balancing_loss
+    train_loss = (
+        mlm_loss + cfg.model.loss.load_balancing_loss_coeff * load_balancing_loss
+    )
 
-    return train_loss,mlm_loss,load_balancing_loss
-
+    return train_loss, mlm_loss, load_balancing_loss
 
 
 def mop_loss_fn(logits, expert_usage_loss, cfg, batch, num_tokens):
     mlm_loss_fn = CrossEntropyLoss()
 
-    train_loss = masked_lm_loss = mlm_loss_fn(logits.view(-1, cfg.tokenizer.vocab_size), batch["labels"].view(-1))#reshape since cross entropy expects (n_tokens, n_classes)
+    train_loss = masked_lm_loss = mlm_loss_fn(
+        logits.view(-1, cfg.tokenizer.vocab_size), batch["labels"].view(-1)
+    )  # reshape since cross entropy expects (n_tokens, n_classes)
 
-    expert_dims = [int(expert_size) for expert_size in cfg.model.expert_sizes.split(",")]
+    expert_dims = [
+        int(expert_size) for expert_size in cfg.model.expert_sizes.split(",")
+    ]
     normalisation_factor = sum(expert_dims)
 
-    
-    if cfg.model.loss.cost_based_loss_alpha_start > 0 and cfg.model.loss.cost_based_loss_alpha_end > 0:
-            
-            #compute logsum then exp to prevent overflow
-            #cost_based_loss_alpha = min(cfg.model.loss.cost_based_loss_alpha_end, cfg.model.loss.cost_based_loss_alpha_start+ (cfg.model.loss.cost_based_loss_alpha_end - cfg.model.loss.cost_based_loss_alpha_start)*num_tokens / cfg.model.loss.cost_based_loss_schedule_tokens)
-            linear_alpha = cfg.model.loss.alpha_scaling*cfg.model.loss.cost_based_loss_alpha_end*(num_tokens-cfg.model.loss.cost_based_loss_schedule_tokens)/cfg.model.loss.cost_based_loss_schedule_tokens
-            cost_based_loss_alpha = linear_alpha+cfg.model.loss.cost_based_loss_alpha_end if num_tokens>cfg.model.loss.cost_based_loss_schedule_tokens else cfg.model.loss.cost_based_loss_alpha_start
-            cost_based_loss_alpha = torch.tensor(cost_based_loss_alpha, dtype=torch.float32, device=expert_usage_loss.device)
-           
-            normalisation_factor = torch.tensor(normalisation_factor, dtype=torch.float32, device=expert_usage_loss.device)
-            logsum = cfg.model.expert_cost_exponent*torch.log(normalisation_factor)+torch.log(cost_based_loss_alpha)+torch.log(expert_usage_loss)
-            loss_numerator =torch.exp(logsum).to(dtype=expert_usage_loss.dtype)
-        
-            if cfg.model.loss.disable_task_performance_scaling:
-                expert_loss = loss_numerator
-            else:
-                loss_denominator = cfg.model.loss.cost_based_loss_epsilon + masked_lm_loss.detach()
-                loss_denominator = loss_denominator**cfg.model.loss.denominator_exponent
-                expert_loss = loss_numerator / loss_denominator
+    if (
+        cfg.model.loss.cost_based_loss_alpha_start > 0
+        and cfg.model.loss.cost_based_loss_alpha_end > 0
+    ):
 
-            train_loss = masked_lm_loss + expert_loss
-    else: 
+        # compute logsum then exp to prevent overflow
+        # cost_based_loss_alpha = min(cfg.model.loss.cost_based_loss_alpha_end, cfg.model.loss.cost_based_loss_alpha_start+ (cfg.model.loss.cost_based_loss_alpha_end - cfg.model.loss.cost_based_loss_alpha_start)*num_tokens / cfg.model.loss.cost_based_loss_schedule_tokens)
+        linear_alpha = (
+            cfg.model.loss.alpha_scaling
+            * cfg.model.loss.cost_based_loss_alpha_end
+            * (num_tokens - cfg.model.loss.cost_based_loss_schedule_tokens)
+            / cfg.model.loss.cost_based_loss_schedule_tokens
+        )
+        cost_based_loss_alpha = (
+            linear_alpha + cfg.model.loss.cost_based_loss_alpha_end
+            if num_tokens > cfg.model.loss.cost_based_loss_schedule_tokens
+            else cfg.model.loss.cost_based_loss_alpha_start
+        )
+        cost_based_loss_alpha = torch.tensor(
+            cost_based_loss_alpha, dtype=torch.float32, device=expert_usage_loss.device
+        )
+
+        normalisation_factor = torch.tensor(
+            normalisation_factor, dtype=torch.float32, device=expert_usage_loss.device
+        )
+        logsum = (
+            cfg.model.expert_cost_exponent * torch.log(normalisation_factor)
+            + torch.log(cost_based_loss_alpha)
+            + torch.log(expert_usage_loss)
+        )
+        loss_numerator = torch.exp(logsum).to(dtype=expert_usage_loss.dtype)
+
+        if cfg.model.loss.disable_task_performance_scaling:
+            expert_loss = loss_numerator
+        else:
+            loss_denominator = (
+                cfg.model.loss.cost_based_loss_epsilon + masked_lm_loss.detach()
+            )
+            loss_denominator = loss_denominator**cfg.model.loss.denominator_exponent
+            expert_loss = loss_numerator / loss_denominator
+
+        train_loss = masked_lm_loss + expert_loss
+    else:
         train_loss = masked_lm_loss
-        expert_loss = torch.tensor(0.0, dtype=masked_lm_loss.dtype, device=masked_lm_loss.device)
-        cost_based_loss_alpha = torch.tensor(0.0, dtype=masked_lm_loss.dtype, device=masked_lm_loss.device)
-        
+        expert_loss = torch.tensor(
+            0.0, dtype=masked_lm_loss.dtype, device=masked_lm_loss.device
+        )
+        cost_based_loss_alpha = torch.tensor(
+            0.0, dtype=masked_lm_loss.dtype, device=masked_lm_loss.device
+        )
 
     return train_loss, masked_lm_loss, expert_loss, cost_based_loss_alpha
 
-def mop_loss_fn_balanced(logits, router_logits, expert_usage_loss, cfg, batch, num_tokens):
-    #adds load balancing loss
+
+def mop_loss_fn_balanced(
+    logits, router_logits, expert_usage_loss, cfg, batch, num_tokens
+):
+    # adds load balancing loss
     mlm_loss_fn = CrossEntropyLoss()
 
-    train_loss = masked_lm_loss = mlm_loss_fn(logits.view(-1, cfg.tokenizer.vocab_size), batch["labels"].view(-1))#reshape since cross entropy expects (n_tokens, n_classes)
+    train_loss = masked_lm_loss = mlm_loss_fn(
+        logits.view(-1, cfg.tokenizer.vocab_size), batch["labels"].view(-1)
+    )  # reshape since cross entropy expects (n_tokens, n_classes)
 
-    num_experts = len(cfg.model.expert_sizes.split(','))
-    top_k = cfg.model.num_experts_per_tok_inference # usually 2. We want to load balance when we will be infering. If we take top_k = num_experts we get a constant loss
-    load_balancing_loss = load_balancing_loss_fn(router_logits, top_k=top_k, num_experts=num_experts, attention_mask=batch.get("attention_mask", None))
+    num_experts = len(cfg.model.expert_sizes.split(","))
+    top_k = (
+        cfg.model.num_experts_per_tok_inference
+    )  # usually 2. We want to load balance when we will be infering. If we take top_k = num_experts we get a constant loss
+    load_balancing_loss = load_balancing_loss_fn(
+        router_logits,
+        top_k=top_k,
+        num_experts=num_experts,
+        attention_mask=batch.get("attention_mask", None),
+    )
 
-    expert_dims = [int(expert_size) for expert_size in cfg.model.expert_sizes.split(",")]
+    expert_dims = [
+        int(expert_size) for expert_size in cfg.model.expert_sizes.split(",")
+    ]
     normalisation_factor = sum(expert_dims)
 
+    if (
+        cfg.model.loss.cost_based_loss_alpha_start > 0
+        and cfg.model.loss.cost_based_loss_alpha_end > 0
+    ):
 
-    if cfg.model.loss.cost_based_loss_alpha_start > 0 and cfg.model.loss.cost_based_loss_alpha_end > 0:
-            
-            #compute logsum then exp to prevent overflow
-            #cost_based_loss_alpha = min(cfg.model.loss.cost_based_loss_alpha_end, cfg.model.loss.cost_based_loss_alpha_start+ (cfg.model.loss.cost_based_loss_alpha_end - cfg.model.loss.cost_based_loss_alpha_start)*num_tokens / cfg.model.loss.cost_based_loss_schedule_tokens)
-            linear_alpha = cfg.model.loss.alpha_scaling*cfg.model.loss.cost_based_loss_alpha_end*(num_tokens-cfg.model.loss.cost_based_loss_schedule_tokens)/cfg.model.loss.cost_based_loss_schedule_tokens
-            cost_based_loss_alpha = linear_alpha+cfg.model.loss.cost_based_loss_alpha_end if num_tokens>cfg.model.loss.cost_based_loss_schedule_tokens else cfg.model.loss.cost_based_loss_alpha_start
-            cost_based_loss_alpha = torch.tensor(cost_based_loss_alpha, dtype=torch.float32, device=expert_usage_loss.device)
-           
-            normalisation_factor = torch.tensor(normalisation_factor, dtype=torch.float32, device=expert_usage_loss.device)
-            logsum = cfg.model.expert_cost_exponent*torch.log(normalisation_factor)+torch.log(cost_based_loss_alpha)+torch.log(expert_usage_loss)
-            loss_numerator =torch.exp(logsum).to(dtype=expert_usage_loss.dtype)
-        
-            if cfg.model.loss.disable_task_performance_scaling:
-                expert_loss = loss_numerator
-            else:
-                loss_denominator = cfg.model.loss.cost_based_loss_epsilon + masked_lm_loss.detach()
-                loss_denominator = loss_denominator**cfg.model.loss.denominator_exponent
-                expert_loss = loss_numerator / loss_denominator
+        # compute logsum then exp to prevent overflow
+        # cost_based_loss_alpha = min(cfg.model.loss.cost_based_loss_alpha_end, cfg.model.loss.cost_based_loss_alpha_start+ (cfg.model.loss.cost_based_loss_alpha_end - cfg.model.loss.cost_based_loss_alpha_start)*num_tokens / cfg.model.loss.cost_based_loss_schedule_tokens)
+        linear_alpha = (
+            cfg.model.loss.alpha_scaling
+            * cfg.model.loss.cost_based_loss_alpha_end
+            * (num_tokens - cfg.model.loss.cost_based_loss_schedule_tokens)
+            / cfg.model.loss.cost_based_loss_schedule_tokens
+        )
+        cost_based_loss_alpha = (
+            linear_alpha + cfg.model.loss.cost_based_loss_alpha_end
+            if num_tokens > cfg.model.loss.cost_based_loss_schedule_tokens
+            else cfg.model.loss.cost_based_loss_alpha_start
+        )
+        cost_based_loss_alpha = torch.tensor(
+            cost_based_loss_alpha, dtype=torch.float32, device=expert_usage_loss.device
+        )
 
-            train_loss = masked_lm_loss + expert_loss + cfg.model.loss.load_balancing_loss_coeff * load_balancing_loss
-    else: 
-        train_loss = masked_lm_loss + cfg.model.loss.load_balancing_loss_coeff * load_balancing_loss
-        expert_loss = torch.tensor(0.0, dtype=masked_lm_loss.dtype, device=masked_lm_loss.device)
-        cost_based_loss_alpha = torch.tensor(0.0, dtype=masked_lm_loss.dtype, device=masked_lm_loss.device)
-        
+        normalisation_factor = torch.tensor(
+            normalisation_factor, dtype=torch.float32, device=expert_usage_loss.device
+        )
+        logsum = (
+            cfg.model.expert_cost_exponent * torch.log(normalisation_factor)
+            + torch.log(cost_based_loss_alpha)
+            + torch.log(expert_usage_loss)
+        )
+        loss_numerator = torch.exp(logsum).to(dtype=expert_usage_loss.dtype)
 
-    return train_loss, masked_lm_loss, expert_loss, load_balancing_loss, cost_based_loss_alpha
+        if cfg.model.loss.disable_task_performance_scaling:
+            expert_loss = loss_numerator
+        else:
+            loss_denominator = (
+                cfg.model.loss.cost_based_loss_epsilon + masked_lm_loss.detach()
+            )
+            loss_denominator = loss_denominator**cfg.model.loss.denominator_exponent
+            expert_loss = loss_numerator / loss_denominator
+
+        train_loss = (
+            masked_lm_loss
+            + expert_loss
+            + cfg.model.loss.load_balancing_loss_coeff * load_balancing_loss
+        )
+    else:
+        train_loss = (
+            masked_lm_loss
+            + cfg.model.loss.load_balancing_loss_coeff * load_balancing_loss
+        )
+        expert_loss = torch.tensor(
+            0.0, dtype=masked_lm_loss.dtype, device=masked_lm_loss.device
+        )
+        cost_based_loss_alpha = torch.tensor(
+            0.0, dtype=masked_lm_loss.dtype, device=masked_lm_loss.device
+        )
+
+    return (
+        train_loss,
+        masked_lm_loss,
+        expert_loss,
+        load_balancing_loss,
+        cost_based_loss_alpha,
+    )
 
 
-def general_mop_loss_fn_balanced(task_loss, router_logits, expert_usage_loss, cfg, batch):
+def general_mop_loss_fn_balanced(
+    task_loss, router_logits, expert_usage_loss, cfg, batch
+):
 
-    #can work for any task loss, not only mlm loss
-    #compute the average loss per token
-    
-    num_experts = len(cfg.model.expert_sizes.split(','))
-    top_k = cfg.model.num_experts_per_tok_inference # usually 2. We want to load balance when we will be infering. If we take top_k = num_experts we get a constant loss
-    load_balancing_loss = load_balancing_loss_fn(router_logits, top_k=top_k, num_experts=num_experts, attention_mask=batch.get("attention_mask", None))
+    # can work for any task loss, not only mlm loss
+    # compute the average loss per token
 
-    expert_dims = [int(expert_size) for expert_size in cfg.model.expert_sizes.split(",")]
+    num_experts = len(cfg.model.expert_sizes.split(","))
+    top_k = (
+        cfg.model.num_experts_per_tok_inference
+    )  # usually 2. We want to load balance when we will be infering. If we take top_k = num_experts we get a constant loss
+    load_balancing_loss = load_balancing_loss_fn(
+        router_logits,
+        top_k=top_k,
+        num_experts=num_experts,
+        attention_mask=batch.get("attention_mask", None),
+    )
+
+    expert_dims = [
+        int(expert_size) for expert_size in cfg.model.expert_sizes.split(",")
+    ]
     normalisation_factor = sum(expert_dims)
 
+    if (
+        cfg.model.loss.cost_based_loss_alpha_start > 0
+        and cfg.model.loss.cost_based_loss_alpha_end > 0
+    ):
 
-    if cfg.model.loss.cost_based_loss_alpha_start > 0 and cfg.model.loss.cost_based_loss_alpha_end > 0:
-            
-            #compute logsum then exp to prevent overflow
-            #cost_based_loss_alpha = min(cfg.model.loss.cost_based_loss_alpha_end, cfg.model.loss.cost_based_loss_alpha_start+ (cfg.model.loss.cost_based_loss_alpha_end - cfg.model.loss.cost_based_loss_alpha_start)*num_tokens / cfg.model.loss.cost_based_loss_schedule_tokens)
-            cost_based_loss_alpha = cfg.model.loss.cost_based_loss_alpha_end
-            cost_based_loss_alpha = torch.tensor(cost_based_loss_alpha, dtype=torch.float32, device=expert_usage_loss.device)
-           
-            normalisation_factor = torch.tensor(normalisation_factor, dtype=torch.float32, device=expert_usage_loss.device)
-            logsum = cfg.model.expert_cost_exponent*torch.log(normalisation_factor)+torch.log(cost_based_loss_alpha)+torch.log(expert_usage_loss)
-            loss_numerator =torch.exp(logsum).to(dtype=expert_usage_loss.dtype)
-        
-            if cfg.model.loss.disable_task_performance_scaling:
-                expert_loss = loss_numerator
-            else:
-                loss_denominator = cfg.model.loss.cost_based_loss_epsilon + task_loss.detach()
-                loss_denominator = loss_denominator**cfg.model.loss.denominator_exponent
-                print("loss denominator:", loss_denominator)
-                print("task loss:", task_loss)
-                expert_loss = loss_numerator / loss_denominator
-            
-            train_loss = task_loss + expert_loss + cfg.model.loss.load_balancing_loss_coeff * load_balancing_loss
-    else: 
-        train_loss = task_loss + cfg.model.loss.load_balancing_loss_coeff * load_balancing_loss
+        # compute logsum then exp to prevent overflow
+        # cost_based_loss_alpha = min(cfg.model.loss.cost_based_loss_alpha_end, cfg.model.loss.cost_based_loss_alpha_start+ (cfg.model.loss.cost_based_loss_alpha_end - cfg.model.loss.cost_based_loss_alpha_start)*num_tokens / cfg.model.loss.cost_based_loss_schedule_tokens)
+        cost_based_loss_alpha = cfg.model.loss.cost_based_loss_alpha_end
+        cost_based_loss_alpha = torch.tensor(
+            cost_based_loss_alpha, dtype=torch.float32, device=expert_usage_loss.device
+        )
+
+        normalisation_factor = torch.tensor(
+            normalisation_factor, dtype=torch.float32, device=expert_usage_loss.device
+        )
+        logsum = (
+            cfg.model.expert_cost_exponent * torch.log(normalisation_factor)
+            + torch.log(cost_based_loss_alpha)
+            + torch.log(expert_usage_loss)
+        )
+        loss_numerator = torch.exp(logsum).to(dtype=expert_usage_loss.dtype)
+
+        if cfg.model.loss.disable_task_performance_scaling:
+            expert_loss = loss_numerator
+        else:
+            loss_denominator = (
+                cfg.model.loss.cost_based_loss_epsilon + task_loss.detach()
+            )
+            loss_denominator = loss_denominator**cfg.model.loss.denominator_exponent
+            print("loss denominator:", loss_denominator)
+            print("task loss:", task_loss)
+            expert_loss = loss_numerator / loss_denominator
+
+        train_loss = (
+            task_loss
+            + expert_loss
+            + cfg.model.loss.load_balancing_loss_coeff * load_balancing_loss
+        )
+    else:
+        train_loss = (
+            task_loss + cfg.model.loss.load_balancing_loss_coeff * load_balancing_loss
+        )
         expert_loss = torch.tensor(0.0, dtype=task_loss.dtype, device=task_loss.device)
-        cost_based_loss_alpha = torch.tensor(0.0, dtype=task_loss.dtype, device=task_loss.device)
+        cost_based_loss_alpha = torch.tensor(
+            0.0, dtype=task_loss.dtype, device=task_loss.device
+        )
 
-    return train_loss, task_loss, expert_loss, load_balancing_loss, cost_based_loss_alpha
+    return (
+        train_loss,
+        task_loss,
+        expert_loss,
+        load_balancing_loss,
+        cost_based_loss_alpha,
+    )
 
-# from ..Analysis.analysis import get_normalised_expert_usage_cost_per_sequence
+    # from ..Analysis.analysis import get_normalised_expert_usage_cost_per_sequence
 
-# def mop_loss_fn_alt(logits, router_logits, cfg, batch, num_tokens):
+    # def mop_loss_fn_alt(logits, router_logits, cfg, batch, num_tokens):
 
-#     #compute a separate mlm_loss for each sequence in the batch
-#     mlm_loss_fn = CrossEntropyLoss(reduction = "none")
-#     train_loss = masked_lm_loss = mlm_loss_fn(logits.view(-1, cfg.tokenizer.vocab_size), batch["labels"].view(-1))#shape seq_length*nbatch_size
-#     masked_lm_loss = masked_lm_loss.reshape(logits.size(0), logits.size(1))#shape (batch_size, seq_length)
-#     mask = (batch["labels"] != -100).float()  # (batch_size, seq_len)
-#     # Sum losses and normalize by number of valid tokens in each sequence
-#     masked_lm_loss = (masked_lm_loss * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)#shape (batch_size,)
+    #     #compute a separate mlm_loss for each sequence in the batch
+    #     mlm_loss_fn = CrossEntropyLoss(reduction = "none")
+    #     train_loss = masked_lm_loss = mlm_loss_fn(logits.view(-1, cfg.tokenizer.vocab_size), batch["labels"].view(-1))#shape seq_length*nbatch_size
+    #     masked_lm_loss = masked_lm_loss.reshape(logits.size(0), logits.size(1))#shape (batch_size, seq_length)
+    #     mask = (batch["labels"] != -100).float()  # (batch_size, seq_len)
+    #     # Sum losses and normalize by number of valid tokens in each sequence
+    #     masked_lm_loss = (masked_lm_loss * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)#shape (batch_size,)
 
-#     #get the expert loss per sequence
-#     expert_usage_loss = get_normalised_expert_usage_cost_per_sequence(router_logits, batch.get("attention_mask", None), cfg)#shape (batch_size,)
+    #     #get the expert loss per sequence
+    #     expert_usage_loss = get_normalised_expert_usage_cost_per_sequence(router_logits, batch.get("attention_mask", None), cfg)#shape (batch_size,)
 
-#     expert_dims = [int(expert_size) for expert_size in cfg.model.expert_sizes.split(",")]
-#     normalisation_factor = sum(expert_dims)
-
+    #     expert_dims = [int(expert_size) for expert_size in cfg.model.expert_sizes.split(",")]
+    #     normalisation_factor = sum(expert_dims)
 
     if cfg.model.loss.cost_based_loss_alpha_start > 0:
-            
-            #compute logsum then exp to prevent overflow
-            #cost_based_loss_alpha = min(cfg.model.loss.cost_based_loss_alpha_end, cfg.model.loss.cost_based_loss_alpha_start+ (cfg.model.loss.cost_based_loss_alpha_end - cfg.model.loss.cost_based_loss_alpha_start)*num_tokens / cfg.model.loss.cost_based_loss_schedule_tokens)
-            cost_based_loss_alpha = cfg.model.loss.cost_based_loss_alpha_end if num_tokens>cfg.model.loss.cost_based_loss_schedule_tokens else cfg.model.loss.cost_based_loss_alpha_start
-            cost_based_loss_alpha = torch.tensor(cost_based_loss_alpha, dtype=torch.float32, device=expert_usage_loss.device)
-           
-            normalisation_factor = torch.tensor(normalisation_factor, dtype=torch.float32, device=expert_usage_loss.device)
-            logsum = cfg.model.expert_cost_exponent*torch.log(normalisation_factor)+torch.log(cost_based_loss_alpha)+torch.log(expert_usage_loss)
-            loss_numerator =torch.exp(logsum).to(dtype=expert_usage_loss.dtype)#shape (batch_size,)
 
-            if cfg.model.loss.disable_task_performance_scaling:
-                expert_loss = loss_numerator
-            else:
-                loss_denominator = cfg.model.loss.cost_based_loss_epsilon + masked_lm_loss
-                expert_loss = loss_numerator / loss_denominator
+        # compute logsum then exp to prevent overflow
+        # cost_based_loss_alpha = min(cfg.model.loss.cost_based_loss_alpha_end, cfg.model.loss.cost_based_loss_alpha_start+ (cfg.model.loss.cost_based_loss_alpha_end - cfg.model.loss.cost_based_loss_alpha_start)*num_tokens / cfg.model.loss.cost_based_loss_schedule_tokens)
+        cost_based_loss_alpha = (
+            cfg.model.loss.cost_based_loss_alpha_end
+            if num_tokens > cfg.model.loss.cost_based_loss_schedule_tokens
+            else cfg.model.loss.cost_based_loss_alpha_start
+        )
+        cost_based_loss_alpha = torch.tensor(
+            cost_based_loss_alpha, dtype=torch.float32, device=expert_usage_loss.device
+        )
 
-            train_loss = masked_lm_loss + expert_loss
-            train_loss = torch.mean(train_loss)
+        normalisation_factor = torch.tensor(
+            normalisation_factor, dtype=torch.float32, device=expert_usage_loss.device
+        )
+        logsum = (
+            cfg.model.expert_cost_exponent * torch.log(normalisation_factor)
+            + torch.log(cost_based_loss_alpha)
+            + torch.log(expert_usage_loss)
+        )
+        loss_numerator = torch.exp(logsum).to(
+            dtype=expert_usage_loss.dtype
+        )  # shape (batch_size,)
+
+        if cfg.model.loss.disable_task_performance_scaling:
+            expert_loss = loss_numerator
+        else:
+            loss_denominator = cfg.model.loss.cost_based_loss_epsilon + masked_lm_loss
+            expert_loss = loss_numerator / loss_denominator
+
+        train_loss = masked_lm_loss + expert_loss
+        train_loss = torch.mean(train_loss)
 
     return train_loss, masked_lm_loss.mean(), expert_loss.mean(), cost_based_loss_alpha

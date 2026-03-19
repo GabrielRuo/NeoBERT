@@ -26,7 +26,9 @@ def preprocess(cfg: DictConfig):
         dataset = load_dataset(**cfg.dataset.train)
 
     print("Tokenizing dataset")
-    dataset = tokenize(dataset, tokenizer, column_name=cfg.dataset.column, **cfg.tokenizer)
+    dataset = tokenize(
+        dataset, tokenizer, column_name=cfg.dataset.column, **cfg.tokenizer
+    )
 
     # Save the tokenized dataset to disk
     print("Saving tokenized dataset")

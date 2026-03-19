@@ -29,7 +29,9 @@ DATASET_TO_BSZ = {
 
 def get_bsz(dataset_name, target_batch_size):
     if dataset_name not in DATASET_TO_BSZ.keys():
-        raise ValueError(f"{dataset_name} is not a known finetuning dataset. Available splits are: {DATASET_TO_BSZ.keys()}")
+        raise ValueError(
+            f"{dataset_name} is not a known finetuning dataset. Available splits are: {DATASET_TO_BSZ.keys()}"
+        )
 
     return target_batch_size // DATASET_TO_BSZ[dataset_name]
 
@@ -72,7 +74,12 @@ class ALLNLI(AbsDataset):
 
     def from_hub(self):
         num_proc = len(os.sched_getaffinity(0))
-        dataset = load_dataset("sentence-transformers/all-nli", name="triplet", split="train", num_proc=num_proc)
+        dataset = load_dataset(
+            "sentence-transformers/all-nli",
+            name="triplet",
+            split="train",
+            num_proc=num_proc,
+        )
 
         dataset = dataset.rename_column("anchor", "query")
         dataset = dataset.rename_column("positive", "corpus")
@@ -88,7 +95,9 @@ class AMAZONQA(AbsDataset):
 
     def from_hub(self):
         num_proc = len(os.sched_getaffinity(0))
-        dataset = load_dataset("embedding-data/Amazon-QA", split="train", num_proc=num_proc)
+        dataset = load_dataset(
+            "embedding-data/Amazon-QA", split="train", num_proc=num_proc
+        )
 
         def unwrap_corpus_column(example):
             example["corpus"] = [pos[0] for pos in example["pos"]]
@@ -98,7 +107,11 @@ class AMAZONQA(AbsDataset):
             unwrap_corpus_column,
             batched=True,
             num_proc=num_proc,
-            remove_columns=[col for col in dataset.column_names if col not in ["query", "corpus", "negative"]],
+            remove_columns=[
+                col
+                for col in dataset.column_names
+                if col not in ["query", "corpus", "negative"]
+            ],
         )
 
         return dataset
@@ -112,7 +125,9 @@ class CONCURRENTQA(AbsDataset):
 
     def from_hub(self):
         num_proc = len(os.sched_getaffinity(0))
-        dataset = load_dataset("stanfordnlp/concurrentqa-retrieval", split="train", num_proc=num_proc)
+        dataset = load_dataset(
+            "stanfordnlp/concurrentqa-retrieval", split="train", num_proc=num_proc
+        )
 
         dataset = dataset.rename_column("question", "query")
 
@@ -125,7 +140,11 @@ class CONCURRENTQA(AbsDataset):
             process,
             batched=True,
             num_proc=num_proc,
-            remove_columns=[col for col in dataset.column_names if col not in ["query", "corpus", "negative"]],
+            remove_columns=[
+                col
+                for col in dataset.column_names
+                if col not in ["query", "corpus", "negative"]
+            ],
         )
 
         return dataset
@@ -176,7 +195,12 @@ class GITHUBISSUE(AbsDataset):
 
     def from_hub(self):
         num_proc = len(os.sched_getaffinity(0))
-        dataset = load_dataset("WhereIsAI/github-issue-similarity", "positive", split="train", num_proc=num_proc)
+        dataset = load_dataset(
+            "WhereIsAI/github-issue-similarity",
+            "positive",
+            split="train",
+            num_proc=num_proc,
+        )
 
         dataset = dataset.rename_column("anchor", "query")
         dataset = dataset.rename_column("positive", "corpus")
@@ -192,20 +216,32 @@ class GOOAQ(AbsDataset):
 
     def from_hub(self):
         num_proc = len(os.sched_getaffinity(0))
-        dataset = load_dataset("tomaarsen/gooaq-hard-negatives", name="triplet-5", split="train", num_proc=num_proc)
+        dataset = load_dataset(
+            "tomaarsen/gooaq-hard-negatives",
+            name="triplet-5",
+            split="train",
+            num_proc=num_proc,
+        )
 
         dataset = dataset.rename_column("question", "query")
         dataset = dataset.rename_column("answer", "corpus")
 
         def aggregate_negatives(example):
-            example["negative"] = [[example[f"negative_{i + 1}"][j] for i in range(5)] for j in range(len(example["query"]))]
+            example["negative"] = [
+                [example[f"negative_{i + 1}"][j] for i in range(5)]
+                for j in range(len(example["query"]))
+            ]
             return example
 
         dataset = dataset.map(
             aggregate_negatives,
             batched=True,
             num_proc=num_proc,
-            remove_columns=[col for col in dataset.column_names if col not in ["query", "corpus", "negative"]],
+            remove_columns=[
+                col
+                for col in dataset.column_names
+                if col not in ["query", "corpus", "negative"]
+            ],
         )
 
         return dataset
@@ -255,7 +291,9 @@ class PAQ(AbsDataset):
 
     def from_hub(self):
         num_proc = len(os.sched_getaffinity(0))
-        dataset = load_dataset("embedding-data/PAQ_pairs", split="train", num_proc=num_proc)
+        dataset = load_dataset(
+            "embedding-data/PAQ_pairs", split="train", num_proc=num_proc
+        )
 
         def split_set_column(example):
             example["query"] = [x[0] for x in example["set"]]
@@ -266,7 +304,11 @@ class PAQ(AbsDataset):
             split_set_column,
             batched=True,
             num_proc=num_proc,
-            remove_columns=[col for col in dataset.column_names if col not in ["query", "corpus", "negative"]],
+            remove_columns=[
+                col
+                for col in dataset.column_names
+                if col not in ["query", "corpus", "negative"]
+            ],
         )
 
         return dataset
@@ -280,20 +322,32 @@ class PUBMEDQA(AbsDataset):
 
     def from_hub(self):
         num_proc = len(os.sched_getaffinity(0))
-        dataset = load_dataset("sentence-transformers/pubmedqa", name="triplet-20", split="train", num_proc=num_proc)
+        dataset = load_dataset(
+            "sentence-transformers/pubmedqa",
+            name="triplet-20",
+            split="train",
+            num_proc=num_proc,
+        )
 
         dataset = dataset.rename_column("anchor", "query")
         dataset = dataset.rename_column("positive", "corpus")
 
         def aggregate_negatives(example):
-            example["negative"] = [[example[f"negative_{i + 1}"][j] for i in range(20)] for j in range(len(example["query"]))]
+            example["negative"] = [
+                [example[f"negative_{i + 1}"][j] for i in range(20)]
+                for j in range(len(example["query"]))
+            ]
             return example
 
         dataset = dataset.map(
             aggregate_negatives,
             batched=True,
             num_proc=num_proc,
-            remove_columns=[col for col in dataset.column_names if col not in ["query", "corpus", "negative"]],
+            remove_columns=[
+                col
+                for col in dataset.column_names
+                if col not in ["query", "corpus", "negative"]
+            ],
         )
 
         return dataset
@@ -307,7 +361,9 @@ class QQP(AbsDataset):
 
     def from_hub(self):
         num_proc = len(os.sched_getaffinity(0))
-        dataset = load_dataset("embedding-data/QQP_triplets", split="train", num_proc=num_proc)
+        dataset = load_dataset(
+            "embedding-data/QQP_triplets", split="train", num_proc=num_proc
+        )
 
         def split_set_column(example):
             example["query"] = [x["query"] for x in example["set"]]
@@ -319,7 +375,11 @@ class QQP(AbsDataset):
             split_set_column,
             batched=True,
             num_proc=num_proc,
-            remove_columns=[col for col in dataset.column_names if col not in ["query", "corpus", "negative"]],
+            remove_columns=[
+                col
+                for col in dataset.column_names
+                if col not in ["query", "corpus", "negative"]
+            ],
         )
 
         return dataset
@@ -333,7 +393,9 @@ class SENTENCECOMP(AbsDataset):
 
     def from_hub(self):
         num_proc = len(os.sched_getaffinity(0))
-        dataset = load_dataset("embedding-data/sentence-compression", split="train", num_proc=num_proc)
+        dataset = load_dataset(
+            "embedding-data/sentence-compression", split="train", num_proc=num_proc
+        )
 
         def split_set_column(example):
             example["query"] = [x[1] for x in example["set"]]
@@ -344,7 +406,11 @@ class SENTENCECOMP(AbsDataset):
             split_set_column,
             batched=True,
             num_proc=num_proc,
-            remove_columns=[col for col in dataset.column_names if col not in ["query", "corpus", "negative"]],
+            remove_columns=[
+                col
+                for col in dataset.column_names
+                if col not in ["query", "corpus", "negative"]
+            ],
         )
 
         return dataset
@@ -360,10 +426,16 @@ class STACKEXCHANGE(AbsDataset):
         num_proc = len(os.sched_getaffinity(0))
 
         dataset_body = load_dataset(
-            "sentence-transformers/stackexchange-duplicates", name="body-body-pair", split="train", num_proc=num_proc
+            "sentence-transformers/stackexchange-duplicates",
+            name="body-body-pair",
+            split="train",
+            num_proc=num_proc,
         )
         dataset_post = load_dataset(
-            "sentence-transformers/stackexchange-duplicates", name="post-post-pair", split="train", num_proc=num_proc
+            "sentence-transformers/stackexchange-duplicates",
+            name="post-post-pair",
+            split="train",
+            num_proc=num_proc,
         )
 
         dataset_body = dataset_body.rename_column("body1", "query")
@@ -385,7 +457,9 @@ class STACKOVERFLOW(AbsDataset):
 
     def from_hub(self):
         num_proc = len(os.sched_getaffinity(0))
-        dataset = load_dataset("mteb/stackoverflowdupquestions-reranking", split="train", num_proc=num_proc)
+        dataset = load_dataset(
+            "mteb/stackoverflowdupquestions-reranking", split="train", num_proc=num_proc
+        )
 
         def split_set_column(example):
             example["corpus"] = [x[0] for x in example["positive"]]
@@ -395,7 +469,11 @@ class STACKOVERFLOW(AbsDataset):
             split_set_column,
             batched=True,
             num_proc=num_proc,
-            remove_columns=[col for col in dataset.column_names if col not in ["query", "corpus", "negative"]],
+            remove_columns=[
+                col
+                for col in dataset.column_names
+                if col not in ["query", "corpus", "negative"]
+            ],
         )
 
         return dataset
@@ -416,7 +494,13 @@ class STS12(AbsDataset):
         dataset = dataset.rename_column("sentence1", "query")
         dataset = dataset.rename_column("sentence2", "corpus")
 
-        dataset = dataset.remove_columns([col for col in dataset.column_names if col not in ["query", "corpus", "negative"]])
+        dataset = dataset.remove_columns(
+            [
+                col
+                for col in dataset.column_names
+                if col not in ["query", "corpus", "negative"]
+            ]
+        )
 
         return dataset
 
@@ -429,14 +513,22 @@ class STSBENCHMARK(AbsDataset):
 
     def from_hub(self):
         num_proc = len(os.sched_getaffinity(0))
-        dataset = load_dataset("mteb/stsbenchmark-sts", split="train", num_proc=num_proc)
+        dataset = load_dataset(
+            "mteb/stsbenchmark-sts", split="train", num_proc=num_proc
+        )
 
         dataset.filter(lambda x: x["score"] > 4)
 
         dataset = dataset.rename_column("sentence1", "query")
         dataset = dataset.rename_column("sentence2", "corpus")
 
-        dataset = dataset.remove_columns([col for col in dataset.column_names if col not in ["query", "corpus", "negative"]])
+        dataset = dataset.remove_columns(
+            [
+                col
+                for col in dataset.column_names
+                if col not in ["query", "corpus", "negative"]
+            ]
+        )
 
         return dataset
 
@@ -449,7 +541,12 @@ class TRIVIAQA(AbsDataset):
 
     def from_hub(self):
         num_proc = len(os.sched_getaffinity(0))
-        dataset = load_dataset("sentence-transformers/trivia-qa-triplet", name="triplet", split="train", num_proc=num_proc)
+        dataset = load_dataset(
+            "sentence-transformers/trivia-qa-triplet",
+            name="triplet",
+            split="train",
+            num_proc=num_proc,
+        )
 
         dataset = dataset.rename_column("anchor", "query")
         dataset = dataset.rename_column("positive", "corpus")
@@ -465,7 +562,9 @@ class WIKIHOW(AbsDataset):
 
     def from_hub(self):
         num_proc = len(os.sched_getaffinity(0))
-        dataset = load_dataset("sentence-transformers/wikihow", split="train", num_proc=num_proc)
+        dataset = load_dataset(
+            "sentence-transformers/wikihow", split="train", num_proc=num_proc
+        )
 
         dataset = dataset.rename_column("text", "query")
         dataset = dataset.rename_column("summary", "corpus")

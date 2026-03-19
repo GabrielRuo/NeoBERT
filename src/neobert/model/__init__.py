@@ -15,8 +15,6 @@ from .model import (
     NeoBERT,
     NeoBERTConfig,
     NeoBERTForSequenceClassification,
-    #MoEBlock
+    # MoEBlock
 )
-from .neobert_original import  NeoBERTLMHead as NeoBERTLMHeadOriginal
-
-
+from .neobert_original import NeoBERTLMHead as NeoBERTLMHeadOriginal

@@ -2,7 +2,7 @@ import os
 from transformers import PreTrainedTokenizerFast
 from huggingface_hub import hf_hub_download
 
-from datasets import load_dataset,load_from_disk, Dataset
+from datasets import load_dataset, load_from_disk, Dataset
 from typing import Optional, Any
 import logging
 
@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)#not sure why
+logging.basicConfig(level=logging.INFO)  # not sure why
 
 
 # def get_dataset(
@@ -50,13 +50,14 @@ logging.basicConfig(level=logging.INFO)#not sure why
 
 #     return dataset
 
+
 def get_dataset_path(dataset_name: str, num_samples: Optional[int]) -> Path:
     """Construct a unique path for caching the dataset."""
     base_dir = Path("/data") if Path("/data").exists() else Path.home()
     cache_root = base_dir / ".pathways_cache"
     cache_root.mkdir(parents=True, exist_ok=True)
 
-    dataset_key = ''.join(c for c in dataset_name if c.isalnum()).lower()
+    dataset_key = "".join(c for c in dataset_name if c.isalnum()).lower()
     if num_samples is None:
         return cache_root / f"{dataset_key}"
     else:
@@ -71,7 +72,7 @@ def get_datasetCRAMMING(
 ) -> Dataset:
     """
     Load and cache a Hugging Face dataset for efficient reuse.
-    
+
     Args:
         dataset_name (str): Dataset identifier on Hugging Face.
         split (str): Dataset split, usually "train".
@@ -81,14 +82,13 @@ def get_datasetCRAMMING(
     Returns:
         Dataset: The loaded dataset, formatted for PyTorch.
     """
-    #assert not streaming, "Streaming mode is not supported with caching"
+    # assert not streaming, "Streaming mode is not supported with caching"
 
     if num_samples is None:
         logger.info(f"loading full dataset from {hf_path} ...")
         dataset_path = get_dataset_path(hf_path, num_samples)
-    else: 
+    else:
         dataset_path = get_dataset_path(hf_path, num_samples)
-
 
     if dataset_path.exists():
         logger.info(f"Loading cached dataset from: {dataset_path}")
@@ -97,12 +97,17 @@ def get_datasetCRAMMING(
         if num_samples is None:
             dataset = load_dataset(hf_path, split=split, streaming=False)
         else:
-            logger.info(f"Downloading and caching {hf_path} with {num_samples} samples...")
-            dataset = load_dataset(hf_path, split=f"{split}[:{num_samples}]", streaming=False)
+            logger.info(
+                f"Downloading and caching {hf_path} with {num_samples} samples..."
+            )
+            dataset = load_dataset(
+                hf_path, split=f"{split}[:{num_samples}]", streaming=False
+            )
         dataset.set_format(type="torch", columns=["input_ids"])
         dataset.save_to_disk(dataset_path)
 
     return dataset
+
 
 def get_tokenizerCRAMMING(tokenizer_parent_dir=None):
     """
@@ -114,16 +119,20 @@ def get_tokenizerCRAMMING(tokenizer_parent_dir=None):
     """
     # Resolve default path relative to this file
     if tokenizer_parent_dir is None:
-        this_dir = os.path.dirname(os.path.abspath(__file__))  
+        this_dir = os.path.dirname(os.path.abspath(__file__))
         tokenizer_parent_dir = os.path.abspath(os.path.join(this_dir, ".."))
 
     # Download files if needed
-    for filename in ["tokenizer.json", "tokenizer_config.json", "special_tokens_map.json"]:
+    for filename in [
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+    ]:
         hf_hub_download(
-        repo_id="JonasGeiping/the_pile_WordPiecex32768_8eb2d0ea9da707676c81314c4ea04507",
-        filename=f"tokenizer/{filename}",
-        repo_type="dataset",
-        local_dir=tokenizer_parent_dir,
+            repo_id="JonasGeiping/the_pile_WordPiecex32768_8eb2d0ea9da707676c81314c4ea04507",
+            filename=f"tokenizer/{filename}",
+            repo_type="dataset",
+            local_dir=tokenizer_parent_dir,
         )
     print(tokenizer_parent_dir)
 
@@ -131,6 +140,3 @@ def get_tokenizerCRAMMING(tokenizer_parent_dir=None):
     tokenizer_dir = os.path.abspath(os.path.join(tokenizer_parent_dir, "tokenizer"))
     tokenizer = PreTrainedTokenizerFast.from_pretrained(tokenizer_dir)
     return tokenizer
-
-
-

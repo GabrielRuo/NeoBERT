@@ -13,8 +13,8 @@ val_batches_per_eval:  50
 val_interval: 30
 
 saved_model:
-  base_path: /runs/logs/checkpoints/mop_2025-08-15_16-07-06/
-  checkpoint: mop_100
+  base_path: /runs/logs/checkpoints/mop_2025-12-02_16-36-59/
+  checkpoint: '40000'
 
 hydra:
   run:
