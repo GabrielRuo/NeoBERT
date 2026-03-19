@@ -9,6 +9,17 @@ NeoBERT is a **next-generation encoder** model for English text representation, 
 
 ## Get started
 
+### Recommended: open in a Dev Container
+
+For the most reproducible local workflow, open this repository in a VS Code Dev Container.
+This ensures you use the same OS and dependency setup as the documented commands and tests.
+
+In VS Code:
+
+1. Install the **Dev Containers** extension.
+2. Run **Dev Containers: Reopen in Container** from the Command Palette.
+3. Wait for the container to build, then run commands from `/workspace`.
+
 Ensure you have the following dependencies installed:
 
 ```bash
@@ -20,6 +31,126 @@ If you would like to use sequence packing (un-padding), you will need to also in
 ```bash
 pip install transformers torch xformers==0.0.28.post3 flash_attn
 ```
+
+## Testing Pipeline
+
+### Optional local Git gates with pre-commit
+
+Use `pre-commit` to enforce fast checks before commit/push:
+
+- Commit gate: file hygiene checks + `black` on changed Python files.
+- Push gate: `pytest -m local -q`.
+
+Install and enable hooks:
+
+```bash
+pip install pre-commit
+pre-commit install --hook-type pre-commit --hook-type pre-push
+```
+
+Run all configured hooks manually:
+
+```bash
+pre-commit run --all-files
+```
+
+When cloning this repo, run tests in 3 stages. This gives fast feedback first,
+then validates external dependencies, and finally validates the full online path.
+
+All test commands below are intended to be run from the Docker container
+defined by `docker-compose.yml` (service: `modal-like`).
+
+Start and enter the container:
+
+```bash
+docker compose up -d modal-like
+docker compose exec modal-like bash
+cd /workspace
+```
+
+Alternatively, run tests directly from the host with `docker compose exec` one-liners.
+
+### 1) Local deterministic smoke tests (default)
+
+These tests should pass without network access when local caches/checkpoints are present.
+
+```bash
+pytest -m local -q
+```
+
+Host one-liner:
+
+```bash
+docker compose exec modal-like bash -lc "cd /workspace && pytest -m local -q"
+```
+
+This currently includes:
+
+- `tests/test_pretrain_smoke.py`
+- `tests/test_predictor_smoke.py`
+
+### 2) External connectivity tests (HF, W&B, Modal)
+
+These tests check that credentials and service connectivity are healthy independently,
+which makes external failures easier to diagnose.
+
+```bash
+RUN_EXTERNAL_TESTS=1 pytest tests/test_external_connectivity.py -q
+```
+
+Host one-liner:
+
+```bash
+docker compose exec modal-like bash -lc "cd /workspace && RUN_EXTERNAL_TESTS=1 pytest tests/test_external_connectivity.py -q"
+```
+
+Expected environment variables:
+
+- Hugging Face: no token needed for the public connectivity check.
+- W&B: `WANDB_API_KEY`
+- Modal: `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`
+
+### 3) Full external E2E test (slow, opt-in)
+
+Runs the real `predict_routing.py` entrypoint with online mode enabled.
+
+```bash
+RUN_EXTERNAL_E2E=1 pytest tests/test_external_e2e.py -q -m "external and e2e"
+```
+
+Host one-liner:
+
+```bash
+docker compose exec modal-like bash -lc "cd /workspace && RUN_EXTERNAL_E2E=1 pytest tests/test_external_e2e.py -q -m 'external and e2e'"
+```
+
+Useful overrides:
+
+- `PREDICT_ROUTING_E2E_TIMEOUT` (default: `3600` seconds)
+- `PREDICT_ROUTING_E2E_SCRIPT` (default: `scripts/analyses/predict_routing.py`)
+- `PREDICT_ROUTING_E2E_OVERRIDES` (space-separated Hydra overrides)
+
+Example:
+
+```bash
+PREDICT_ROUTING_E2E_OVERRIDES="saved_model.checkpoint=mop_100" RUN_EXTERNAL_E2E=1 pytest tests/test_external_e2e.py -q
+```
+
+### Suggested CI / release cadence
+
+- Per-PR: `pytest -m local -q`
+- Daily scheduled: `RUN_EXTERNAL_TESTS=1 pytest tests/test_external_connectivity.py -q`
+- Nightly or pre-release: `RUN_EXTERNAL_E2E=1 pytest tests/test_external_e2e.py -q -m "external and e2e"`
+
+### Pytest markers
+
+The test suite uses these markers:
+
+- `local`: deterministic local tests
+- `external`: tests that depend on external services
+- `e2e`: full pipeline integration
+- `slow`: long-running tests
+- `smoke`: quick sanity checks
 
 ## How to use
 
