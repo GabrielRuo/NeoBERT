@@ -12,6 +12,9 @@ import os
 
 TIMEOUT = 24 * 60 * 60  # one day
 
+# Keep Modal image compatible with segmented optional dependencies in pyproject.toml.
+MODAL_OPTIONAL_DEPS = ["modal", "train"]
+
 app = modal.App("neobert")
 
 # use os.getenv to get the secrets from the environment variables that were loaded from the .env file.
@@ -44,7 +47,10 @@ wandb_secret = modal.Secret.from_dict({"WANDB_API_KEY": wandb_api_key})
 experiment_image = (
     modal.Image.debian_slim()
     .apt_install("git")
-    .pip_install_from_pyproject(Path(__file__).resolve().parents[2] / "pyproject.toml")
+    .pip_install_from_pyproject(
+        Path(__file__).resolve().parents[2] / "pyproject.toml",
+        optional_dependencies=MODAL_OPTIONAL_DEPS,
+    )
     .add_local_dir("../../conf", "/root/conf")
 )
 
