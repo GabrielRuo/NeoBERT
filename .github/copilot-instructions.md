@@ -44,3 +44,70 @@ This project implements NeoBERT (pretraining + evaluation + utilities). The note
   - Tests: `pyproject.toml` lists `pytest` under dev extras; create focused unit tests that import the trainer functions and run a tiny in-memory dataset.
 
 If anything here is unclear or you want examples for a specific flow (e.g., add a new pretraining config, or run a tiny local multi-process test), tell me which flow and I will expand the instructions.
+
+## Agent Operating Contract (Authoritative)
+
+This section is the source of truth for autonomous coding behavior in this repository.
+
+- Default mode: audit-first
+  - Agents must start in read-only audit mode for cleanup work.
+  - No file deletion, rename, or move is allowed before explicit user approval.
+
+- Cleanup decision rubric
+  - Keep: file is referenced by imports, entrypoints, tests, configs, CI, or docs.
+  - Delete-candidate: no references, duplicate/copy artifact, obsolete generated file, or empty/stub file.
+  - Rename-candidate: useful file with non-descriptive or inconsistent naming.
+  - Defer: uncertain external usage or medium/high removal risk.
+
+- Evidence requirement
+  - Every delete or rename proposal must include concrete evidence:
+    - at least one reference search result, or
+    - explicit confirmation that no references were found.
+
+- Batch size and safety
+  - Apply destructive changes in small batches (max 10 files).
+  - After each batch, run relevant tests or collection checks.
+  - Never revert unrelated local modifications.
+
+- Commit discipline
+  - One logical change per commit.
+  - Commit message format: type(scope): short summary
+  - Commit body must include: files changed, verification run, and risk notes.
+
+## Approval Protocol
+
+The user controls execution with the following commands.
+
+- PROPOSE ONLY
+  - Agent produces recommendations with evidence; no edits.
+
+- APPLY APPROVED
+  - Agent applies only items explicitly approved by the user.
+
+- COMMIT APPROVED
+  - Agent creates a commit only for already approved changes.
+
+- NEXT FOLDER
+  - Agent moves audit to the next folder.
+
+- SKIP FOLDER
+  - Agent skips current folder without edits.
+
+- STOP
+  - Agent halts immediately and performs no further actions.
+
+## Branch Safety Policy (Required)
+
+- Never commit directly to `main` or `master`.
+- All code changes must be committed on `clean_up_code`.
+- If currently on `main` or `master`, switch or create branch before editing:
+  - `git switch clean_up_code || git switch -c clean_up_code`
+- Push only `clean_up_code`:
+  - `git push -u origin clean_up_code` (first push)
+  - `git push origin clean_up_code` (subsequent pushes)
+- If branch switch/create fails, stop and ask the user. Do not commit.
+
+## Pre-Commit Check (Mandatory)
+
+- Run `git branch --show-current` before every commit.
+- If output is not `clean_up_code`, do not commit; switch branches first.
