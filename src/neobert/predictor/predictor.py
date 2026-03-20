@@ -127,7 +127,7 @@ class RouterPredictionHead(nn.Module):
 class BERTPredictor(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        self.bert = BertModel.from_pretrained("bert-base-uncased")
+        self.bert = BertModel.from_pretrained("google-bert/bert-base-uncased")
         # #freeze bert params for LoRA
         # for param in self.bert.parameters():
         #     param.requires_grad = False
