@@ -4,6 +4,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        NEOBERT_EXTRAS: "dev,modal,train_base"
+        TORCH_BACKEND: "cpu"
     container_name: neobert_modal_local
     # Mount full repo root for cleaner access (includes .git for commits)
     # /data and /runs are kept as separate mounts to mirror Modal volume semantics
