@@ -30,9 +30,9 @@ from ..tokenizer import get_tokenizer
 from ..optimizer import get_optimizer
 from ..scheduler import get_scheduler
 from ..dataloader import get_dataloader
-from ..datasetCRAMMING import get_datasetCRAMMING, get_tokenizerCRAMMING
+from ..dataset_pile import get_dataset_pile, get_tokenizer_pile
 from ..dataset import get_dataset
-from ..dataloaderCRAMMING import get_dataloaderCRAMMING
+from ..dataloader_pile import get_dataloader_pile
 from ..analysis import AnalysisTraining, AnalysisTrainedModel
 
 # loss functions
@@ -199,22 +199,22 @@ def train_and_eval_sweep(cfg: DictConfig):
         dtype_pad_mask = torch.bfloat16
 
     if (
-        cfg.dataset.name == "crammingpile"
-    ):  # careful to have correct configs in pretraining.yaml cfg such that cfg.dataloader is CRAMMINGdataloader,  cfg.tokenizer is CRAMMINGtokenizer cfg.datacollator is CRAMMINGmlm_15
+        cfg.dataset.name == "pile"
+    ):  # requires pile dataset/tokenizer/dataloader/datacollator configs (dataset=pile, tokenizer=pile, dataloader=standard, datacollator=pile_mlm_15)
         # Tokenizer
-        tokenizer = get_tokenizerCRAMMING(cfg.tokenizer.tokenizer_parent_dir)
+        tokenizer = get_tokenizer_pile(cfg.tokenizer.tokenizer_parent_dir)
 
         # Dataset
-        train_dataset = get_datasetCRAMMING(**cfg.dataset.train)
+        train_dataset = get_dataset_pile(**cfg.dataset.train)
 
         # Dataloader
         dataloader_config_args = dict(**cfg.dataloader.train, **cfg.datacollator)
         dataloader_config_args["shuffle"] = not cfg.dataset.train.streaming
-        train_dataloader = get_dataloaderCRAMMING(
+        train_dataloader = get_dataloader_pile(
             train_dataset, tokenizer, **dataloader_config_args
         )
 
-        # train_dataloader = get_dataloaderCRAMMING(train_dataset, tokenizer, **cfg.dataloader.train, **cfg.datacollator)
+        # train_dataloader = get_dataloader_pile(train_dataset, tokenizer, **cfg.dataloader.train, **cfg.datacollator)
 
     else:
 

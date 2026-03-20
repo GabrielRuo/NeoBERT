@@ -10,7 +10,7 @@ defaults:
   - scheduler: cosine_decay
   - trainer: 
     - mlm
-  - dataloader: CRAMMINGdataloader
+  - dataloader: standard
   - datacollator: mlm_15
 
 seed: 0

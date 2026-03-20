@@ -1,18 +1,17 @@
 defaults:
   - _self_
-  - dataset: CRAMMINGpile
-  - tokenizer: CRAMMINGtokenizer
+  - dataset: pile
+  - tokenizer: pile
   - model: 
     - neobert
-    - tiny_test
+    - architecture_mop
     - mop
   - optimizer: adamw
   - scheduler: cosine_decay
   - trainer: 
     - mlm
-    - losses
-  - dataloader: CRAMMINGdataloader
-  - datacollator: CRAMMINGmlm_15
+  - dataloader: standard
+  - datacollator: pile_mlm_15
 
 seed: 0
 
@@ -28,7 +27,5 @@ wandb:
   tags: []
   dir: logs/wandb
   mode: online
-  log_interval: 1
-
-
+  log_interval: 100
 

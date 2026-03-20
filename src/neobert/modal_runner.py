@@ -83,17 +83,29 @@ training_data_volume = modal.Volume.from_name(
     },
     timeout=TIMEOUT,
 )
-# def run_pretrain(args: list[str]) -> None:
-#     """Launch pretraining using the provided command arguments."""
-#     subprocess.run(args, check=True)
-def run_pretrain(overrides: list[str], model_type: str) -> None:
-    """Launch pretraining using the provided command arguments."""
+def run_pretrain(overrides: list[str], model_type: str = "neobert") -> None:
+    """Launch pretraining using the provided command arguments.
+
+    ``model_type`` selects the Hydra config file (``pretraining_<model_type>.yaml``).
+    It can alternatively be embedded in *overrides* as ``model_type=<value>``, making
+    the override list order-independent.  A value in *overrides* takes precedence over
+    the explicit ``model_type`` argument.
+    """
     from hydra import initialize, compose
     from neobert.pretraining import trainer
 
+    # Allow model_type to be specified via overrides (order-independent)
+    resolved_model_type = model_type
+    clean_overrides = []
+    for o in overrides:
+        if o.startswith("model_type=") or o.startswith("+model_type=") or o.startswith("++model_type="):
+            resolved_model_type = o.split("=", 1)[1]
+        else:
+            clean_overrides.append(o)
+
     with initialize(config_path="../conf", version_base=None):
-        config_name = "pretraining_" + model_type
-        cfg = compose(config_name=config_name, overrides=overrides)
+        config_name = "pretraining_" + resolved_model_type
+        cfg = compose(config_name=config_name, overrides=clean_overrides)
         trainer(cfg)
 
 
@@ -208,14 +220,29 @@ def run_analyses_pretrained() -> None:
     },
     timeout=TIMEOUT,
 )
-def run_pretrain_sweep(overrides: list[str], model_type: str) -> None:
-    """Launch pretraining using the provided command arguments."""
+def run_pretrain_sweep(overrides: list[str], model_type: str = "neobert") -> None:
+    """Launch a hyperparameter sweep using the provided command arguments.
+
+    ``model_type`` selects the Hydra config file (``pretraining_<model_type>.yaml``).
+    It can alternatively be embedded in *overrides* as ``model_type=<value>``, making
+    the override list order-independent.  A value in *overrides* takes precedence over
+    the explicit ``model_type`` argument.
+    """
     from hydra import initialize, compose
     from neobert.pretraining import train_and_eval_sweep
 
+    # Allow model_type to be specified via overrides (order-independent)
+    resolved_model_type = model_type
+    clean_overrides = []
+    for o in overrides:
+        if o.startswith("model_type=") or o.startswith("+model_type=") or o.startswith("++model_type="):
+            resolved_model_type = o.split("=", 1)[1]
+        else:
+            clean_overrides.append(o)
+
     with initialize(config_path="../conf", version_base=None):
-        config_name = "pretraining_" + model_type
-        cfg = compose(config_name=config_name, overrides=overrides)
+        config_name = "pretraining_" + resolved_model_type
+        cfg = compose(config_name=config_name, overrides=clean_overrides)
         with open("conf/sweeps/sweep.yaml") as f:
             sweep_cfg = yaml.safe_load(f)
 

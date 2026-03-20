@@ -1,7 +1,7 @@
 defaults:
   - _self_
-  - dataset: CRAMMINGpile
-  - tokenizer: CRAMMINGtokenizer
+  - dataset: pile
+  - tokenizer: pile
   - model: 
     - neobert
     - 250M-opt
@@ -11,8 +11,8 @@ defaults:
   - trainer: 
     - mlm
     - losses
-  - dataloader: CRAMMINGdataloader
-  - datacollator: CRAMMINGmlm_15
+  - dataloader: standard
+  - datacollator: pile_mlm_15
 
 seed: 0
 

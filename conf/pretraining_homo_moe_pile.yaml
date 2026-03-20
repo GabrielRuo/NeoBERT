@@ -1,17 +1,17 @@
 defaults:
   - _self_
-  - dataset: CRAMMINGpile
-  - tokenizer: CRAMMINGtokenizer
+  - dataset: pile
+  - tokenizer: pile
   - model: 
     - neobert
-    - architecture_hetero_moe
-    - hetero_moe
+    - architecture_homo_moe
+    - homo_moe
   - optimizer: adamw
   - scheduler: cosine_decay
   - trainer: 
     - mlm
-  - dataloader: CRAMMINGdataloader
-  - datacollator: CRAMMINGmlm_15
+  - dataloader: standard
+  - datacollator: pile_mlm_15
 
 seed: 0
 
@@ -23,11 +23,9 @@ wandb:
   resume: never
   name: null
   project: MoP
-  entity: g-ruault-centralesup-lec
+  entity: gabriel-ruault-centralesup-lec
   tags: []
   dir: logs/wandb
   mode: online
   log_interval: 100
-
-
 
