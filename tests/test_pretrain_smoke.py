@@ -87,7 +87,7 @@ def test_get_dataset_prefers_configured_path_to_disk(monkeypatch, tmp_path):
 
 def test_pretrain_trainer_end_to_end_smoke(monkeypatch, tmp_path):
     """Build a 4-sample synthetic dataset and run exactly one MoP training step
-    without touching the network (the bert-base-uncased tokenizer must already be
+    without touching the network (the google-bert/bert-base-uncased tokenizer must already be
     cached in HF_HOME, which is /cache/hf inside the container)."""
     import torch
     from neobert.pretraining.trainer import trainer

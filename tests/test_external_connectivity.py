@@ -24,12 +24,8 @@ def test_huggingface_connection_public_model_info():
     from huggingface_hub import HfApi
 
     api = HfApi()
-    model_info = api.model_info("bert-base-uncased")
-    # HF may canonicalize this model under a namespace (e.g. google-bert/*).
-    assert model_info.id in {
-        "bert-base-uncased",
-        "google-bert/bert-base-uncased",
-    }
+    model_info = api.model_info("google-bert/bert-base-uncased")
+    assert model_info.id == "google-bert/bert-base-uncased"
 
 
 def test_wandb_connection_authenticated_viewer():
