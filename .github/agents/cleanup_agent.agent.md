@@ -108,3 +108,4 @@ If full validation is not possible, report exactly what was not run and why.
 - For reviews/audits, list findings first by severity.
 - State assumptions and blockers explicitly.
 - End with clear outcomes and immediate next actions.
+
