@@ -1,0 +1,21 @@
+# Keep Docker build context small.
+.git
+.gitignore
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Large local artifacts not needed at build time.
+cache/
+data/
+logs/
+
+# Exclude all run outputs by default...
+runs/
+
+# Optional local env files
+.env
