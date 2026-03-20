@@ -1,3 +1,8 @@
+---
+name: cleanup_agent
+description: "Repo cleanup agent: safe deletions/renames, small batches, validates changes."
+---
+
 # NeoBERT Agent Specification
 
 This file defines how an autonomous background coding agent should operate in this repository.
