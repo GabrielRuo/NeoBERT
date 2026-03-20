@@ -124,10 +124,31 @@ class RouterPredictionHead(nn.Module):
         )
 
 
+def _load_bert_backbone():
+    model_ids = ["google-bert/bert-base-uncased", "bert-base-uncased"]
+    offline = (
+        os.getenv("TRANSFORMERS_OFFLINE", "0") == "1"
+        or os.getenv("HF_HUB_OFFLINE", "0") == "1"
+    )
+    load_kwargs = {"local_files_only": True} if offline else {}
+
+    last_error = None
+    for model_id in model_ids:
+        try:
+            return BertModel.from_pretrained(model_id, **load_kwargs)
+        except Exception as exc:
+            last_error = exc
+
+    raise RuntimeError(
+        "Unable to load BERT backbone from local cache. "
+        f"Tried model ids: {model_ids}."
+    ) from last_error
+
+
 class BERTPredictor(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        self.bert = BertModel.from_pretrained("google-bert/bert-base-uncased")
+        self.bert = _load_bert_backbone()
         # #freeze bert params for LoRA
         # for param in self.bert.parameters():
         #     param.requires_grad = False
