@@ -1,7 +1,7 @@
 defaults:
   - _self_
-  - dataset: pile
-  - tokenizer: pile
+  - dataset: refinedweb
+  - tokenizer: google
   - model: 
     - neobert
     - 250M-opt
@@ -10,9 +10,8 @@ defaults:
   - scheduler: cosine_decay
   - trainer: 
     - mlm
-    - losses
   - dataloader: standard
-  - datacollator: pile_mlm_15
+  - datacollator: mlm_15
 
 seed: 0
 
@@ -29,6 +28,4 @@ wandb:
   dir: logs/wandb
   mode: online
   log_interval: 100
-
-
 

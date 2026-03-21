@@ -30,9 +30,7 @@ from ..tokenizer import get_tokenizer
 from ..optimizer import get_optimizer
 from ..scheduler import get_scheduler
 from ..dataloader import get_dataloader
-from ..dataset_pile import get_dataset_pile, get_tokenizer_pile
 from ..dataset import get_dataset
-from ..dataloader_pile import get_dataloader_pile
 from ..analysis import AnalysisTraining, AnalysisTrainedModel
 
 # loss functions
@@ -198,26 +196,6 @@ def train_and_eval_sweep(cfg: DictConfig):
     elif accelerator.mixed_precision == "bf16":
         dtype_pad_mask = torch.bfloat16
 
-    if (
-        cfg.dataset.name == "pile"
-    ):  # requires pile dataset/tokenizer/dataloader/datacollator configs (dataset=pile, tokenizer=pile, dataloader=standard, datacollator=pile_mlm_15)
-        # Tokenizer
-        tokenizer = get_tokenizer_pile(cfg.tokenizer.tokenizer_parent_dir)
-
-        # Dataset
-        train_dataset = get_dataset_pile(**cfg.dataset.train)
-
-        # Dataloader
-        dataloader_config_args = dict(**cfg.dataloader.train, **cfg.datacollator)
-        dataloader_config_args["shuffle"] = not cfg.dataset.train.streaming
-        train_dataloader = get_dataloader_pile(
-            train_dataset, tokenizer, **dataloader_config_args
-        )
-
-        # train_dataloader = get_dataloader_pile(train_dataset, tokenizer, **cfg.dataloader.train, **cfg.datacollator)
-
-    else:
-
         # Tokenizer
         tokenizer = get_tokenizer(**cfg.tokenizer)
 
@@ -241,15 +219,6 @@ def train_and_eval_sweep(cfg: DictConfig):
             **cfg.dataloader.test,
             **cfg.datacollator,
         )  # ultimately should be moved to cfg.dataloader.test
-
-        # # Tokenizer
-        # tokenizer = get_tokenizer(**cfg.tokenizer)
-
-        # # Dataset
-        # train_dataset = load_from_disk(cfg.dataset.path_to_disk)
-
-        # # Dataloader
-        # train_dataloader = get_dataloader(train_dataset, tokenizer, dtype=dtype_pad_mask, **cfg.dataloader.train, **cfg.datacollator)
 
     # Model
 
