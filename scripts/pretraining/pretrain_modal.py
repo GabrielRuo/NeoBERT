@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 #   WANDB_API_KEY=your_wandb_api_key_here
 load_dotenv()
 
-modal = True
+modal = False
 cli_arguments = sys.argv[1:]
 
 
