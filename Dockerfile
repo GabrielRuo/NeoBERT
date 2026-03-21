@@ -11,7 +11,7 @@ WORKDIR /workspace
 # Keep system deps minimal for development containers.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-    git curl ca-certificates \
+    git curl ca-certificates build-essential \
  && rm -rf /var/lib/apt/lists/*
 
 # copy minimal metadata and source so editable install can succeed at build time
@@ -30,19 +30,23 @@ ARG NEOBERT_EXTRAS="dev,modal,train_base"
 #   none -> skip torch installation
 ARG TORCH_BACKEND="cpu"
 
-# upgrade pip and install project in editable mode with selected extras
+# Install torch backend first so transitive torch requirements (e.g. via peft)
+# do not pull default Linux CUDA wheels (nvidia_* packages) during editable install.
+# In cpu mode we also expose the PyTorch CPU index while installing extras.
 RUN python -m pip install --upgrade pip setuptools wheel \
- && pip install -e ".[${NEOBERT_EXTRAS}]" \
- || (echo "editable install failed; trying fallback to install project deps only" && pip install --no-deps -e /workspace)
-
-# Install torch explicitly to avoid accidental CUDA downloads in dev builds.
-RUN if [ "${TORCH_BACKEND}" = "cpu" ]; then \
+ && if [ "${TORCH_BACKEND}" = "cpu" ]; then \
             pip install --index-url https://download.pytorch.org/whl/cpu "torch==2.5.*"; \
         elif [ "${TORCH_BACKEND}" = "cuda" ]; then \
             pip install "torch==2.5.*"; \
         else \
-            echo "Skipping torch install (TORCH_BACKEND=${TORCH_BACKEND})"; \
-        fi
+            echo "Skipping torch preinstall (TORCH_BACKEND=${TORCH_BACKEND})"; \
+        fi \
+ && if [ "${TORCH_BACKEND}" = "cpu" ]; then \
+            PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu pip install -e ".[${NEOBERT_EXTRAS}]"; \
+        else \
+            pip install -e ".[${NEOBERT_EXTRAS}]"; \
+        fi \
+ || (echo "editable install failed; trying fallback to install project deps only" && pip install --no-deps -e /workspace)
 
 # Create Modal-like mountpoints and caches
 RUN mkdir -p /workspace/conf /workspace/src /runs /data /cache/hf

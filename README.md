@@ -110,6 +110,17 @@ Expected environment variables:
 - W&B: `WANDB_API_KEY`
 - Modal: `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`
 
+Add these credentials to your repository `.env` file (used by `docker-compose.yml`):
+
+```bash
+# .env
+MODAL_TOKEN_ID=ak-xxxxxxxxxxxxxxxxxxxx
+MODAL_TOKEN_SECRET=as-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+If you do not have Modal credentials yet, create them with `modal token new` and copy
+the generated `token_id` and `token_secret` values into `.env`.
+
 ### 3) Full external E2E test (slow, opt-in)
 
 Runs the real `predict_routing.py` entrypoint with online mode enabled.

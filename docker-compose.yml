@@ -16,7 +16,6 @@ services:
       - ./runs:/runs:rw # to mimic Modal's /runs for easier local/Modal parity
       - ~/.ssh:/root/.ssh:ro
       - ~/.gitconfig:/root/.gitconfig:ro
-      - ${HOME}/.modal.toml:/root/.modal.toml:ro
       - ~/.cache/pip:/root/.cache/pip:rw
     env_file: # directly inject environment variables from .env, which is gitignored and should contain actual credentials
       - .env
