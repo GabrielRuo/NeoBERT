@@ -24,8 +24,8 @@ services:
       HF_HUB_OFFLINE: "0"
       HF_DATASETS_OFFLINE: "0"
       WANDB_MODE: "offline"
-      HF_HOME: "/workspace/cache/hf"
-      TRANSFORMERS_CACHE: "/workspace/cache/hf"
+      HF_HOME: "/workspace/.cache/hf"
+      TRANSFORMERS_CACHE: "/workspace/.cache/hf"
       # convenience override for trainer default path
       TRAINER_CHECKPOINT_DIR: "/runs/checkpoints"
     stdin_open: true

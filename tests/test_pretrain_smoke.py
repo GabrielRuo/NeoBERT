@@ -85,12 +85,12 @@ def test_get_dataset_prefers_configured_path_to_disk(monkeypatch, tmp_path):
     assert called["load_dataset"] is False
 
 
-def test_pretrain_trainer_end_to_end_smoke(monkeypatch, tmp_path):
+def test_pretrain_trainer_end_to_end_smoke(monkeypatch, tmp_path, minimal_tokenizer):
     """Build a 4-sample synthetic dataset and run exactly one MoP training step
-    without touching the network (the google-bert/bert-base-uncased tokenizer must already be
-    cached in HF_HOME, which is /cache/hf inside the container)."""
+    without touching the network using a toy tokenizer."""
     import torch
     from neobert.pretraining.trainer import trainer
+    from neobert.tokenizer import get_tokenizer as real_get_tokenizer
 
     # 1. Synthetic tokenised dataset: 4 sequences × 64 token-ids (safe BERT vocab range)
     rng = torch.Generator()
@@ -103,7 +103,8 @@ def test_pretrain_trainer_end_to_end_smoke(monkeypatch, tmp_path):
     # 2. Replace torch.compile with a no-op to avoid compilation overhead on CPU
     monkeypatch.setattr(torch, "compile", lambda m, **kw: m)
 
-    # 3. Enforce offline mode – the tokenizer must be pre-cached in HF_HOME
+    # 3. Use toy tokenizer instead of requiring cached HF downloads
+    monkeypatch.setattr("neobert.tokenizer.get_tokenizer", lambda **kwargs: minimal_tokenizer)
     monkeypatch.setenv("TRANSFORMERS_OFFLINE", "1")
     monkeypatch.setenv("HF_DATASETS_OFFLINE", "1")
 

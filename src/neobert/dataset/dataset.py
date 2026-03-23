@@ -16,7 +16,15 @@ logging.basicConfig(level=logging.INFO)  # not sure why
 
 
 def get_dataset_path(dataset_name: str, num_samples: Optional[int]) -> Path:
-    """Construct a unique path for caching the dataset."""
+    """Construct a unique path for caching the tokenized dataset.
+
+    Note:
+        This is intentionally separate from Hugging Face's default cache roots.
+        Raw HF downloads (models/tokenizers/dataset source files) are controlled
+        by runtime env vars such as HF_HOME/TRANSFORMERS_CACHE/HF_DATASETS_CACHE,
+        while this function stores processed, tokenized datasets under
+        /data/.pathways_cache (or ~/.pathways_cache fallback when /data is absent).
+    """
     base_dir = Path("/data") if Path("/data").exists() else Path.home()
     cache_root = base_dir / ".pathways_cache"
     cache_root.mkdir(parents=True, exist_ok=True)
