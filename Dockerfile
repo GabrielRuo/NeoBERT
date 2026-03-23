@@ -11,7 +11,7 @@ WORKDIR /workspace
 # Keep system deps minimal for development containers.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-    git curl ca-certificates build-essential \
+    git curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 # copy minimal metadata and source so editable install can succeed at build time
@@ -49,7 +49,7 @@ RUN python -m pip install --upgrade pip setuptools wheel \
  || (echo "editable install failed; trying fallback to install project deps only" && pip install --no-deps -e /workspace)
 
 # Create Modal-like mountpoints and caches
-RUN mkdir -p /workspace/conf /workspace/src /runs /data /cache/hf
+RUN mkdir -p /workspace/conf /workspace/src /runs /data /workspace/.cache/hf
 
 # Checkpoints are expected via mounted volumes (for faster, smaller builds).
 
@@ -58,8 +58,8 @@ ENV TRANSFORMERS_OFFLINE=0 \
     HF_HUB_OFFLINE=0 \
     HF_DATASETS_OFFLINE=0 \
     WANDB_MODE=offline \
-    HF_HOME=/cache/hf \
-    TRANSFORMERS_CACHE=/cache/hf
+    HF_HOME=/workspace/.cache/hf \
+    TRANSFORMERS_CACHE=/workspace/.cache/hf
 
 WORKDIR /workspace
 

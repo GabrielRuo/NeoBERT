@@ -26,9 +26,11 @@ def _has_override(overrides, key):
 def test_predict_routing_full_pipeline_offline_local_assets():
     """Run predict_routing with local-only model + datasets and no network access.
 
+    Skips gracefully if required local assets (model, datasets, tokenizer) are missing.
     This test executes the real script entrypoint and is intentionally opt-in
     because it depends on pre-existing local artifacts.
     """
+    from transformers import AutoTokenizer
 
     repo_root = Path(__file__).resolve().parents[1]
 
@@ -36,6 +38,19 @@ def test_predict_routing_full_pipeline_offline_local_assets():
         pytest.skip(
             "python-dotenv is required by scripts/analyses/predict_routing.py. "
             "Install it to run this offline E2E test."
+        )
+
+    # Check for cached tokenizer early; skip if missing to avoid subprocess failure
+    tokenizer_name = os.getenv(
+        "PREDICT_ROUTING_OFFLINE_E2E_TOKENIZER",
+        "google-bert/bert-base-uncased",
+    )
+    try:
+        AutoTokenizer.from_pretrained(tokenizer_name, local_files_only=True)
+    except Exception as exc:
+        pytest.skip(
+            "Offline predict_routing E2E requires a locally cached tokenizer. "
+            f"Missing tokenizer {tokenizer_name!r}: {exc}"
         )
 
     script_path = os.getenv(
@@ -137,7 +152,13 @@ def test_predict_routing_full_pipeline_offline_local_assets():
     reason="Set RUN_OFFLINE_E2E=1 to run the full offline E2E pipeline",
 )
 def test_pretrain_full_pipeline_offline_local_dataset(tmp_path):
-    """Run pretrain.py end-to-end with a local synthetic dataset in offline mode."""
+    """Run pretrain.py end-to-end with a local synthetic dataset in offline mode.
+    
+    Skips gracefully if no tokenizer is cached locally; users can pre-cache
+    a tokenizer via: python -c "from transformers import AutoTokenizer; 
+    AutoTokenizer.from_pretrained('google-bert/bert-base-uncased')" in online mode,
+    or run with RUN_OFFLINE_E2E=0 to skip offline tests entirely.
+    """
 
     from datasets import Dataset
     from transformers import AutoTokenizer

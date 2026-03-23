@@ -340,7 +340,10 @@ def test_predict_routing_cli_entrypoint_smoke(monkeypatch):
 	def _fake_compose(config_name=None, overrides=None):
 		calls["config_name"] = config_name
 		calls["overrides"] = list(overrides or [])
-		return SimpleNamespace(source="cli_smoke")
+		# Provide a .modal attribute with .run_on_modal property to match expected config
+		class DummyModal:
+			run_on_modal = False
+		return SimpleNamespace(source="cli_smoke", modal=DummyModal())
 
 	def _fake_predictor(cfg):
 		calls["predictor_called"] += 1
