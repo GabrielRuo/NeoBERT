@@ -1,3 +1,21 @@
+## Code Review, Git Workflow, and Agent Guardrails
+
+- **CODEOWNERS**: This repo enforces code review for all changes via the `.github/CODEOWNERS` file. All pull requests require approval from the listed owner(s). If you fork or clone this repo and want to control reviews, update or remove this file.
+
+- **Git workflow**: Changes should be made on feature branches, not directly on `main`. Pull requests (PRs) trigger automated tests and require review before merging. Pre-commit and pre-push hooks run fast checks and tests locally (see above for setup).
+
+- **Tests at push/PR time**: On push and PR, the following are enforced:
+      - Pre-commit: file hygiene and formatting checks
+      - Pre-push: local smoke tests (`pytest -m local -q`)
+      - PR: full test suite and code review
+
+- **Agent guardrails**: The repo is configured for safe agent-assisted development:
+      - Agents operate in audit mode by default (read-only, propose changes)
+      - Destructive changes (deletes/renames) require explicit human approval
+      - All changes are validated by tests before merging
+      - One logical change per commit, with clear commit messages
+
+These guardrails ensure safe, reviewable, and reproducible development, whether by humans or AI agents.
 # NeoBERT
 
 ## Description
@@ -6,6 +24,71 @@ NeoBERT is a **next-generation encoder** model for English text representation, 
 
 - Paper: [paper](https://arxiv.org/abs/2502.19587)
 - Model: [huggingface](https://huggingface.co/chandar-lab/NeoBERT).
+
+
+## Repository Structure
+
+- **src/neobert/**: Core model code (pretraining, glue, predictor, analysis, contrastive, modal_runner).
+- **conf/**: Hydra configs for datasets, models, dataloaders, optimizers, schedulers, etc.
+- **scripts/**: Entrypoints for pretraining, fine-tuning, evaluation, and analysis (local and Modal cloud).
+- **jobs/**: Example shell scripts for cluster/multi-GPU runs.
+- **tests/**: Pytest-based test suite (smoke, offline, external, e2e).
+- **Dockerfile, docker-compose.yml**: Containerized environment for reproducible runs.
+
+## Quickstart: Setup & Testing
+
+1. **Clone the repo**
+      ```bash
+      git clone <repo-url>
+      cd NeoBERT
+      ```
+
+2. **Configure secrets**
+      - Create a `.env` file in the repo root. You can refer to `.env.example` for guidance:
+        ```
+        HF_TOKEN=your_huggingface_token
+        WANDB_API_KEY=your_wandb_api_key
+        MODAL_TOKEN_ID=your_modal_token_id
+        MODAL_TOKEN_SECRET=your_modal_token_secret
+        ```
+      - Get Modal credentials with `modal token new`.
+
+3. **Build and enter the Docker container**
+      ```bash
+      docker compose up -d modal-like
+      docker compose exec modal-like bash
+      cd /workspace
+      ```
+
+4. **Run offline smoke tests**
+      ```bash
+      pytest -m local -q
+      ```
+
+5. **Check external connectivity (HF, W&B, Modal)**
+      ```bash
+      RUN_EXTERNAL_TESTS=1 pytest tests/test_external_connectivity.py -q
+      ```
+
+6. **Run full E2E tests (online)**
+      ```bash
+      RUN_EXTERNAL_E2E=1 pytest tests/test_external_e2e.py -q -m "external and e2e"
+      ```
+
+7. **Run full offline E2E tests**
+      ```bash
+      RUN_OFFLINE_E2E=1 pytest tests/test_offline_e2e.py -q -m "local and e2e"
+      ```
+
+## Key Scripts
+
+- **Pretraining**: `scripts/pretraining/pretrain.py` (local), `scripts/pretraining/pretrain_modal.py` (Modal cloud)
+- **Predict-routing**: `scripts/analyses/predict_routing.py` — tests how predictable a trained model's routing patterns are (i.e., how well the model's internal routing decisions can be predicted from input data).
+- **Fine-tuning**: `scripts/fine_tuning/run_glue.py`
+
+**Tip:** All runtime options are set via Hydra configs in `conf/`. Use CLI overrides for quick experiments.
+
+---
 
 ## Get started
 
