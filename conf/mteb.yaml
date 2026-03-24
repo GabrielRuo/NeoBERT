@@ -1,5 +1,8 @@
 seed: 0
 
+modal:
+  run_on_modal: false
+
 hydra:
   run:
     dir: logs/hydra

@@ -1,3 +1,5 @@
+# Install build-essential for C++ compiler (required by PyTorch and other Python packages)
+RUN apt-get update && apt-get install -y build-essential && rm -rf /var/lib/apt/lists/*
 # Modal-like dev image with configurable dependency profiles.
 FROM python:3.11-slim
 
