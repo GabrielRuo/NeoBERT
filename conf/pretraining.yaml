@@ -1,20 +1,23 @@
 defaults:
   - _self_
-  - dataset: CRAMMINGpile
-  - tokenizer: CRAMMINGtokenizer
-  - model: 
+  - dataset: minipile
+  - tokenizer: google_mini
+  - model:
     - neobert
     - 250M-opt
     - mop
   - optimizer: adamw
   - scheduler: cosine_decay
-  - trainer: 
+  - trainer:
     - mlm
     - losses
-  - dataloader: CRAMMINGdataloader
-  - datacollator: CRAMMINGmlm_15
+  - dataloader: dataloader_pathways
+  - datacollator: mlm_15
 
 seed: 0
+
+modal:
+  run_on_modal: false
 
 hydra:
   run:

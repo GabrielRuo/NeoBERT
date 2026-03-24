@@ -9,6 +9,9 @@ defaults:
 
 seed: 0
 
+modal:
+  run_on_modal: false
+
 saved_model:
   base_path: /runs/logs/checkpoints/mop_2025-08-15_16-07-06/
   checkpoint: mop_100

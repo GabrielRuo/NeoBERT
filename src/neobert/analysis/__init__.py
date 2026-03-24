@@ -7,7 +7,7 @@ __all__ = [
     "pretrained_model_tester",
 ]
 from .analysis_utils import AnalysisMetrics
-from .analysis_test import (
+from .analysis import (
     AnalysisTraining,
     AnalysisLogger,
     AnalysisTrainedModel,

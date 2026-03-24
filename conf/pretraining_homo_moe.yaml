@@ -10,10 +10,13 @@ defaults:
   - scheduler: cosine_decay
   - trainer: 
     - mlm
-  - dataloader: CRAMMINGdataloader
+  - dataloader: dataloader_pathways
   - datacollator: mlm_15
 
 seed: 0
+
+modal:
+  run_on_modal: false
 
 hydra:
   run:

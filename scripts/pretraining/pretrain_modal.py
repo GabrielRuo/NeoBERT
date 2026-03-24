@@ -30,23 +30,13 @@ def get_arg_value(key, cli_arguments=cli_arguments):
     return None
 
 
-def get_modal_flag(cli_arguments=cli_arguments):
-    for arg_index, arg in enumerate(cli_arguments):
-        if arg.startswith("modal="):
-            modal_str = arg.split("=", 1)[1].strip('"').strip("'").lower()
-            cli_overrides = cli_arguments[:arg_index] + cli_arguments[arg_index + 1 :]
-            if modal_str in ["true", "1", "yes"]:
-                return True, cli_overrides
-            elif modal_str in ["false", "0", "no"]:
-                return False, cli_overrides
-            else:
-                print("Warning: invalid modal flag value. Must be 'true' or 'false'. Defaulting to False.")
-                return False, cli_overrides
-    return False, cli_arguments  # default to False if not specified
-
 
 model_type, cli_overrides = get_arg_value("model_type", cli_arguments)
-modal, cli_overrides = get_modal_flag(cli_overrides)
+from hydra import initialize, compose
+with initialize(config_path="../../conf", version_base=None):
+    config_name = "pretraining_" + model_type
+    cfg = compose(config_name=config_name, overrides=cli_overrides)
+modal = cfg.modal.run_on_modal
 
 
 def pipeline_modal(cli_overrides: list[str], model_type) -> None:

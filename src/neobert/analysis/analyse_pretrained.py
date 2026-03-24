@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from omegaconf import OmegaConf
 from ..model import NeoBERTLMHead, NeoBERTConfig
 from ..tokenizer import get_tokenizer
-from .analysis_test import AnalysisTrainedModel
+from .analysis import AnalysisTrainedModel
 from ..pretraining.trainer import to_target_batch_size
 from ..dataset import get_dataset
 from ..dataloader import get_dataloader

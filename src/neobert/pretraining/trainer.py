@@ -13,8 +13,7 @@ import datetime
 import torch
 
 # from torch.nn import CrossEntropyLoss
-
-# Hugging Face
+ # CRAMMING imports removed
 from datasets import load_from_disk
 from transformers import BatchEncoding
 from accelerate import Accelerator
@@ -32,9 +31,7 @@ from ..tokenizer import get_tokenizer
 from ..optimizer import get_optimizer
 from ..scheduler import get_scheduler
 from ..dataloader import get_dataloader
-from ..datasetCRAMMING import get_datasetCRAMMING, get_tokenizerCRAMMING
 from ..dataset import get_dataset
-from ..dataloaderCRAMMING import get_dataloaderCRAMMING
 from ..analysis import AnalysisTraining
 
 # loss functions
@@ -234,16 +231,11 @@ def trainer(cfg: DictConfig):
         tokenizer = get_tokenizerCRAMMING(cfg.tokenizer.tokenizer_parent_dir)
 
         # Dataset
-        train_dataset = get_datasetCRAMMING(**cfg.dataset.train)
 
         # Dataloader
         dataloader_config_args = dict(**cfg.dataloader.train, **cfg.datacollator)
         dataloader_config_args["shuffle"] = not cfg.dataset.train.streaming
-        train_dataloader = get_dataloaderCRAMMING(
-            train_dataset, tokenizer, **dataloader_config_args
-        )
 
-        # train_dataloader = get_dataloaderCRAMMING(train_dataset, tokenizer, **cfg.dataloader.train, **cfg.datacollator)
 
     else:
 

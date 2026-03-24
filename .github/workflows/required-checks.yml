@@ -1,6 +1,7 @@
 name: Required Checks
 
 on:
+  push:
   pull_request:
     branches:
       - main

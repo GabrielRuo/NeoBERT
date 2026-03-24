@@ -16,7 +16,7 @@ from ..dataloader import get_dataloader
 from ..model import NeoBERTLMHead, NeoBERTConfig
 
 # from ..pretraining import mop_loss_fn_balanced
-from .analysis_test import AnalysisTestTrainedModel
+from .analysis import AnalysisTestTrainedModel
 from ..optimizer import get_optimizer
 from ..scheduler import get_scheduler
 

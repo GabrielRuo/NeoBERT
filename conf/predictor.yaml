@@ -9,6 +9,9 @@ defaults:
 
 seed: 0
 
+modal:
+  run_on_modal: false
+
 val_batches_per_eval:  50
 val_interval: 30
 

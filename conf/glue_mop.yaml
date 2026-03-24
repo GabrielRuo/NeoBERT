@@ -13,6 +13,9 @@ defaults:
 
 seed: 0
 
+modal:
+  run_on_modal: false
+
 meta_task: glue
 task: mnli
 id: neobert_1000000_mnli_8_1e-5_0
