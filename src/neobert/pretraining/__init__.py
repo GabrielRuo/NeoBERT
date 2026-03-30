@@ -8,11 +8,9 @@ __all__ = [
     "mop_loss_fn",
     "get_normalised_expert_usage_cost_per_sequence",
     "get_entropy",
-    "train_and_eval_sweep",
 ]
 
 from .trainer import trainer
-from .sweep import train_and_eval_sweep
 from .losses import (
     hetero_moe_loss_fn,
     homo_moe_loss_fn,
