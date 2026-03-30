@@ -6,24 +6,26 @@ from contextlib import nullcontext
 from tqdm import tqdm
 
 from omegaconf import OmegaConf, DictConfig
+"""
+Trainer for NeoBERT pretraining loop.
+Handles model, dataloader, optimizer, scheduler, and logging orchestration.
+"""
 
+import os
+import shutil
+import re
+import warnings
+from contextlib import nullcontext
+from tqdm import tqdm
 import datetime
 
-# PyTorch
+from omegaconf import OmegaConf, DictConfig
 import torch
-
-# from torch.nn import CrossEntropyLoss
- # CRAMMING imports removed
-from datasets import load_from_disk
 from transformers import BatchEncoding
 from accelerate import Accelerator
 from accelerate.utils import DistributedType, ProjectConfiguration, set_seed
 from accelerate.utils import DistributedDataParallelKwargs
 
-# Deepspeed
-# from deepspeed.utils import safe_get_full_fp32_param
-
-# Our metric object and model
 from .metrics import Metrics
 from ..model import NeoBERTLMHead, NeoBERTConfig
 from ..model import NeoBERTLMHeadOriginal
@@ -33,17 +35,14 @@ from ..scheduler import get_scheduler
 from ..dataloader import get_dataloader
 from ..dataset import get_dataset
 from ..analysis import AnalysisTraining
-
-# loss functions
 from .losses import (
     mop_loss_fn,
     hetero_moe_loss_fn,
     homo_moe_loss_fn,
     mop_loss_fn_balanced,
-)  # mop_loss_fn_alt
+)
 
 import wandb
-
 
 def _resolve_mixed_precision(requested_mixed_precision: str) -> str:
     requested = str(requested_mixed_precision).lower()
@@ -113,7 +112,7 @@ def trainer(cfg: DictConfig):
     # Get the last checkpoint id
     time_str = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     model_dir = os.path.join(cfg.trainer.dir, cfg.model.type + "_" + time_str)
-    # wandb_dir = os.path.join(model_dir, "wandb")
+    # ...existing code...
     checkpoint_dir = os.path.join(model_dir, "checkpoints")
     model_checkpoint_dir = os.path.join(model_dir, "model_checkpoints")
     # if cfg.trainer.save_model:
@@ -182,16 +181,7 @@ def trainer(cfg: DictConfig):
     # for k, v in wandb.config.items():
     #     print(k, v, type(v))
 
-    # #in case of sweeps
-    # # wandb_tracker = accelerator.get_tracker("wandb")
-    # for k, v in wandb.config.items():
-    #     if k == "distributed_type":
-    #         continue  # skip metadata keys
-    #     else:
-    #         OmegaConf.update(cfg, k, v, merge=True)
-
-    # print(cfg.model.loss.cost_based_loss_alpha_end)
-    # print(type(cfg.model.loss.cost_based_loss_alpha_end))
+    # ...existing code...
 
     if cfg.model.type == "mop":
         base_name = f"a_strt: {cfg.model.loss.cost_based_loss_alpha_start:.1e}_a_end: {cfg.model.loss.cost_based_loss_alpha_end:.1e}_scaling: {cfg.model.loss.alpha_scaling}_cst_exp:{cfg.model.expert_cost_exponent}"
@@ -224,44 +214,21 @@ def trainer(cfg: DictConfig):
     elif resolved_mixed_precision == "bf16":
         dtype_pad_mask = torch.bfloat16
 
-    if (
-        cfg.dataset.name == "crammingpile"
-    ):  # careful to have correct configs in pretraining.yaml cfg such that cfg.dataloader is CRAMMINGdataloader,  cfg.tokenizer is CRAMMINGtokenizer cfg.datacollator is CRAMMINGmlm_15
-        # Tokenizer
-        tokenizer = get_tokenizerCRAMMING(cfg.tokenizer.tokenizer_parent_dir)
 
-        # Dataset
+    # Tokenizer
+    tokenizer = get_tokenizer(**cfg.tokenizer)
 
-        # Dataloader
-        dataloader_config_args = dict(**cfg.dataloader.train, **cfg.datacollator)
-        dataloader_config_args["shuffle"] = not cfg.dataset.train.streaming
+    # Dataset
+    train_dataset = get_dataset(cfg, **cfg.dataset.train)
 
-
-    else:
-
-        # Tokenizer
-        tokenizer = get_tokenizer(**cfg.tokenizer)
-
-        # Dataset
-        train_dataset = get_dataset(cfg, **cfg.dataset.train)
-
-        # Dataloader
-        train_dataloader = get_dataloader(
-            train_dataset,
-            tokenizer,
-            dtype=dtype_pad_mask,
-            **cfg.dataloader.train,
-            **cfg.datacollator,
-        )
-
-        # # Tokenizer
-        # tokenizer = get_tokenizer(**cfg.tokenizer)
-
-        # # Dataset
-        # train_dataset = load_from_disk(cfg.dataset.path_to_disk)
-
-        # # Dataloader
-        # train_dataloader = get_dataloader(train_dataset, tokenizer, dtype=dtype_pad_mask, **cfg.dataloader.train, **cfg.datacollator)
+    # Dataloader
+    train_dataloader = get_dataloader(
+        train_dataset,
+        tokenizer,
+        dtype=dtype_pad_mask,
+        **cfg.dataloader.train,
+        **cfg.datacollator,
+    )
 
     # Model
 
@@ -339,13 +306,7 @@ def trainer(cfg: DictConfig):
             OmegaConf.save(cfg, os.path.join(model_dir, "config.yaml"))
             # Save wandb run name to a text file in model_dir
 
-    # # Add buffer for moving variance
-    # moving_mean_buffer = []
-
-    # # Buffers for correlation analysis
-    # mse_loss_buffer = []
-    # expert_usage_buffer = []
-    # buffer_size = 100
+    # ...existing code...
 
     while cfg.trainer.max_steps > metrics["train/steps"]:
         # Use skipped_train_dataloader the first epoch after resuming
@@ -547,51 +508,7 @@ def trainer(cfg: DictConfig):
 
                 # compute variance of expert loss between sequences within a batch and  across batches
 
-                # # normalised_expert_usage_cost_per_seq = get_normalised_expert_usage_cost_per_sequence(model_output['router_logits'], batch.get("attention_mask", None), cfg)
-                # # var_across_sequences = torch.var(normalised_expert_usage_cost_per_seq)
-                # # metrics["train/var_across_sequences"] = var_across_sequences.item()
-                # # mean_normalised_expert_usage_cost_per_batch = normalised_expert_usage_cost_per_seq.mean()
-
-                # # Update moving buffer and compute moving variance
-                # moving_mean_buffer.append(mean_normalised_expert_usage_cost_per_batch.item())
-                # if len(moving_mean_buffer) > 10:
-                #     moving_mean_buffer.pop(0)
-                # if len(moving_mean_buffer) > 1:
-                #     moving_var = torch.tensor(moving_mean_buffer).var(unbiased=False).item()
-                # else:
-                #     moving_var = 0.0
-                # metrics["train/moving_var_mean_normalised_expert_usage_cost_per_batch"] = moving_var
-
-                # #compute total entropy
-                # entropy = get_entropy(model_output['router_logits'], cfg, batch.get("attention_mask", None))
-                # metrics["train/entropy"] = entropy.item()
-
-                # per say correlation computation
-                # Extract per-sequence metrics
-
-                # normalised_expert_usage_cost_per_seq = get_normalised_expert_usage_cost_per_sequence(model_output['router_logits'], batch.get("attention_mask", None), cfg)
-                # mse_loss_per_seq = get_mse_per_sequence(model_output['logits'], cfg,batch)
-
-                # # Accumulate in buffers
-                # expert_usage_buffer.extend(normalised_expert_usage_cost_per_seq.detach().cpu().tolist())
-                # mse_loss_buffer.extend(mse_loss_per_seq.detach().cpu().tolist())
-
-                # # When buffer is full, compute correlation and log, then reset
-                # if len(expert_usage_buffer) >= buffer_size and len(mse_loss_buffer) >= buffer_size:
-                #     # Truncate to buffer_size in case of overflow
-                #     expert_usage_arr = torch.tensor(expert_usage_buffer[:buffer_size])
-                #     mse_loss_arr = torch.tensor(mse_loss_buffer[:buffer_size])
-                #     # Compute Pearson correlation
-                #     if expert_usage_arr.std() > 0 and mse_loss_arr.std() > 0:
-                #         correlation = torch.corrcoef(torch.stack([expert_usage_arr, mse_loss_arr]))[0, 1].item()
-                #     else:
-                #         correlation = 0.0
-                #     metrics["train/expert_usage_mse_corr"] = correlation
-                #     # Log correlation
-                #     accelerator.log({"train/expert_usage_mse_corr": correlation})
-                #     # Reset buffers
-                #     expert_usage_buffer = []
-                #     mse_loss_buffer = []
+                # ...existing code...
 
                 if (
                     cfg.trainer.gradient_clipping is not None
@@ -601,15 +518,7 @@ def trainer(cfg: DictConfig):
                         model.parameters(), cfg.trainer.gradient_clipping
                     )
 
-                # #DEBUG: Check for "infinite" or extremely large gradients
-                # large_grad_threshold = 1e20  # You can adjust this threshold if needed
-                # for name, param in model.named_parameters():
-                #     if param.grad is not None:
-                #         if torch.isinf(param.grad).any():
-                #             print(f"[GRAD INF] Layer '{name}' has inf gradients")
-                #         elif (param.grad.abs() >= large_grad_threshold).any():
-                #             max_val = param.grad.abs().max().item()
-                #             print(f"[GRAD HUGE] Layer '{name}' has gradient magnitude up to {max_val:.3e}")
+                # ...existing code...
 
                 # Log step-level metrics
                 pbar.update(1)
@@ -763,18 +672,7 @@ def trainer(cfg: DictConfig):
                             attention_grad_norm**0.5
                         ) / total_grads
 
-                        # special metrics when we specifically look at both loss gradients.
-
-                        # if metrics["train/steps"] % 2 == 1:
-                        #     metrics["train/gate_grads_norm_mlm"] = gate_grad_norm
-                        #     metrics["train/expert_grads_norm_mlm"] = expert_grad_norm
-                        #     metrics["train/embedding_grads_norm_mlm"] = embedding_grad_norm
-                        #     metrics["train/attention_grads_norm_mlm"] = attention_grad_norm
-                        # else:
-                        #     metrics["train/gate_grads_norm_other"] += gate_grad_norm
-                        #     metrics["train/expert_grads_norm_other"] += expert_grad_norm
-                        #     metrics["train/embedding_grads_norm_other"] += embedding_grad_norm
-                        #     metrics["train/attention_grads_norm_other"] += attention_grad_norm
+                        # ...existing code...
 
                     metrics["train/learning_rate"] = optimizer.param_groups[0]["lr"]
                     metrics.log(accelerator, cfg.model.type)

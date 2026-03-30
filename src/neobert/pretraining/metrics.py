@@ -1,6 +1,11 @@
+
+"""
+Metrics tracking and logging for NeoBERT pretraining.
+Aggregates, reduces, and logs scalar/non-scalar metrics across devices.
+"""
+
 import math
 from collections import defaultdict
-
 from torch import Tensor
 from accelerate import Accelerator
 

@@ -13,46 +13,40 @@ import torch
 
 # from torch.nn import CrossEntropyLoss
 
+
+"""
+Test harness for NeoBERT pretraining trainer.
+Runs smoke/e2e tests for model, dataloader, optimizer, and logging flows.
+"""
+
+import os
+import shutil
+import re
+import warnings
+from tqdm import tqdm
+from omegaconf import OmegaConf, DictConfig
+import datetime
+# PyTorch
+import torch
 # Hugging Face
 from datasets import load_from_disk
 from transformers import BatchEncoding
 from accelerate import Accelerator
 from accelerate.utils import DistributedType, ProjectConfiguration, set_seed
 from accelerate.utils import DistributedDataParallelKwargs
-
-# Deepspeed
-# from deepspeed.utils import safe_get_full_fp32_param
-
 # Our metric object and model
 from .metrics import Metrics
 from ..model import NeoBERTLMHead, NeoBERTConfig
+from ..model import NeoBERTLMHeadOriginal
 from ..tokenizer import get_tokenizer
 from ..optimizer import get_optimizer
 from ..scheduler import get_scheduler
 from ..dataloader import get_dataloader
 from ..dataset import get_dataset
-
+from ..analysis import AnalysisTraining, AnalysisTrainedModel
 # loss functions
 from .losses import mop_loss_fn, hetero_moe_loss_fn, homo_moe_loss_fn
-from ..analysis import AnalysisTraining
-
-
-def _resolve_mixed_precision(requested_mixed_precision: str) -> str:
-    requested = str(requested_mixed_precision).lower()
-
-    if requested == "bf16" and torch.cuda.is_available() and not torch.cuda.is_bf16_supported():
-        warnings.warn(
-            "Requested bf16 but current CUDA device does not support it. Falling back to fp16."
-        )
-        return "fp16"
-
-    if requested in {"fp16", "bf16"} and not torch.cuda.is_available():
-        warnings.warn(
-            f"Requested {requested} but CUDA is not available. Falling back to no mixed precision."
-        )
-        return "no"
-
-    return requested
+import wandb
 
 
 def to_target_batch_size(
@@ -243,25 +237,20 @@ def trainer(cfg: DictConfig):
 
     # Optimizer and Scheduler
     optimizer = get_optimizer(
-        model,
-        accelerator.distributed_type,
-        name=cfg.optimizer.name,
-        **cfg.optimizer.hparams,
-    )
-    scheduler = get_scheduler(
-        optimizer=optimizer, lr=cfg.optimizer.hparams.lr, **cfg.scheduler
-    )
-
-    # Prepare with accelerate
-    train_dataloader, model, optimizer, scheduler = accelerator.prepare(
-        train_dataloader,
-        model,
-        optimizer,
-        scheduler,
-    )
-
-    # compile after preparation with accelerate
-    model = torch.compile(model)
+        if (
+            cfg.dataset.name == "crammingpile"
+        ):
+            # TODO: get_tokenizerCRAMMING/get_datasetCRAMMING/get_dataloaderCRAMMING not implemented. Fallback to standard or raise error.
+            tokenizer = get_tokenizer(**cfg.tokenizer)
+            train_dataset = get_dataset(cfg, **cfg.dataset.train)
+            train_dataloader = get_dataloader(
+                train_dataset,
+                tokenizer,
+                dtype=dtype_pad_mask,
+                **cfg.dataloader.train,
+                **cfg.datacollator,
+            )
+        else:
 
     # Resume from the latest checkpoint
     skipped_train_dataloader = None

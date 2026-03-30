@@ -23,6 +23,10 @@ from accelerate import Accelerator
 from accelerate.utils import DistributedType, ProjectConfiguration, set_seed
 from tokenizers.processors import TemplateProcessing
 
+"""
+Alternate trainer for NeoBERT pretraining (phase 2).
+Handles model, dataloader, optimizer, scheduler, and logging orchestration for advanced/experimental flows.
+"""
 # Deepspeed
 from deepspeed.utils import safe_get_full_fp32_param
 
