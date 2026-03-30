@@ -178,10 +178,17 @@ def trainer(cfg: DictConfig):
             }
         },
     )
-    # for k, v in wandb.config.items():
-    #     print(k, v, type(v))
 
-    # ...existing code...
+    # #in case of sweeps
+    # # wandb_tracker = accelerator.get_tracker("wandb")
+    # for k, v in wandb.config.items():
+    #     if k == "distributed_type":
+    #         continue  # skip metadata keys
+    #     else:
+    #         OmegaConf.update(cfg, k, v, merge=True)
+
+    # print(cfg.model.loss.cost_based_loss_alpha_end)
+    # print(type(cfg.model.loss.cost_based_loss_alpha_end))
 
     if cfg.model.type == "mop":
         base_name = f"a_strt: {cfg.model.loss.cost_based_loss_alpha_start:.1e}_a_end: {cfg.model.loss.cost_based_loss_alpha_end:.1e}_scaling: {cfg.model.loss.alpha_scaling}_cst_exp:{cfg.model.expert_cost_exponent}"
@@ -508,7 +515,51 @@ def trainer(cfg: DictConfig):
 
                 # compute variance of expert loss between sequences within a batch and  across batches
 
-                # ...existing code...
+                # # normalised_expert_usage_cost_per_seq = get_normalised_expert_usage_cost_per_sequence(model_output['router_logits'], batch.get("attention_mask", None), cfg)
+                # # var_across_sequences = torch.var(normalised_expert_usage_cost_per_seq)
+                # # metrics["train/var_across_sequences"] = var_across_sequences.item()
+                # # mean_normalised_expert_usage_cost_per_batch = normalised_expert_usage_cost_per_seq.mean()
+
+                # # Update moving buffer and compute moving variance
+                # moving_mean_buffer.append(mean_normalised_expert_usage_cost_per_batch.item())
+                # if len(moving_mean_buffer) > 10:
+                #     moving_mean_buffer.pop(0)
+                # if len(moving_mean_buffer) > 1:
+                #     moving_var = torch.tensor(moving_mean_buffer).var(unbiased=False).item()
+                # else:
+                #     moving_var = 0.0
+                # metrics["train/moving_var_mean_normalised_expert_usage_cost_per_batch"] = moving_var
+
+                # #compute total entropy
+                # entropy = get_entropy(model_output['router_logits'], cfg, batch.get("attention_mask", None))
+                # metrics["train/entropy"] = entropy.item()
+
+                # per say correlation computation
+                # Extract per-sequence metrics
+
+                # normalised_expert_usage_cost_per_seq = get_normalised_expert_usage_cost_per_sequence(model_output['router_logits'], batch.get("attention_mask", None), cfg)
+                # mse_loss_per_seq = get_mse_per_sequence(model_output['logits'], cfg,batch)
+
+                # # Accumulate in buffers
+                # expert_usage_buffer.extend(normalised_expert_usage_cost_per_seq.detach().cpu().tolist())
+                # mse_loss_buffer.extend(mse_loss_per_seq.detach().cpu().tolist())
+
+                # # When buffer is full, compute correlation and log, then reset
+                # if len(expert_usage_buffer) >= buffer_size and len(mse_loss_buffer) >= buffer_size:
+                #     # Truncate to buffer_size in case of overflow
+                #     expert_usage_arr = torch.tensor(expert_usage_buffer[:buffer_size])
+                #     mse_loss_arr = torch.tensor(mse_loss_buffer[:buffer_size])
+                #     # Compute Pearson correlation
+                #     if expert_usage_arr.std() > 0 and mse_loss_arr.std() > 0:
+                #         correlation = torch.corrcoef(torch.stack([expert_usage_arr, mse_loss_arr]))[0, 1].item()
+                #     else:
+                #         correlation = 0.0
+                #     metrics["train/expert_usage_mse_corr"] = correlation
+                #     # Log correlation
+                #     accelerator.log({"train/expert_usage_mse_corr": correlation})
+                #     # Reset buffers
+                #     expert_usage_buffer = []
+                #     mse_loss_buffer = []
 
                 if (
                     cfg.trainer.gradient_clipping is not None
