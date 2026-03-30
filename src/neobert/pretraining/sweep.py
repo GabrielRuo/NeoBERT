@@ -19,8 +19,8 @@ from accelerate import Accelerator
 from accelerate.utils import DistributedType, ProjectConfiguration, set_seed
 from accelerate.utils import DistributedDataParallelKwargs
 
-# Deepspeed
-# from deepspeed.utils import safe_get_full_fp32_param
+
+# Deepspeed integration (optional)
 
 # Our metric object and model
 from .metrics import Metrics
@@ -273,25 +273,20 @@ def train_and_eval_sweep(cfg: DictConfig):
 
     # Optimizer and Scheduler
     optimizer = get_optimizer(
-        model,
-        accelerator.distributed_type,
-        name=cfg.optimizer.name,
-        **cfg.optimizer.hparams,
-    )
-    scheduler = get_scheduler(
-        optimizer=optimizer, lr=cfg.optimizer.hparams.lr, **cfg.scheduler
-    )
-
-    # Prepare with accelerate
-    train_dataloader, test_dataloader, model, optimizer, scheduler = (
-        accelerator.prepare(
-            train_dataloader,
-            test_dataloader,
-            model,
-            optimizer,
-            scheduler,
-        )
-    )
+        if (
+            cfg.dataset.name == "crammingpile"
+        ):
+            # TODO: get_tokenizerCRAMMING/get_datasetCRAMMING/get_dataloaderCRAMMING not implemented. Fallback to standard or raise error.
+            tokenizer = get_tokenizer(**cfg.tokenizer)
+            train_dataset = get_dataset(cfg, **cfg.dataset.train)
+            train_dataloader = get_dataloader(
+                train_dataset,
+                tokenizer,
+                dtype=dtype_pad_mask,
+                **cfg.dataloader.train,
+                **cfg.datacollator,
+            )
+        else:
 
     # compile after preparation with accelerate
     model = torch.compile(model)
