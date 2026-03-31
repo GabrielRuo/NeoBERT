@@ -7,11 +7,6 @@ __all__ = [
     "pretrained_model_tester",
 ]
 from .analysis_utils import AnalysisMetrics
-#
-"""
-Init file for NeoBERT analysis module.
-Exposes analysis classes and utilities for model evaluation and visualization.
-"""
 from .analysis import (
     AnalysisTraining,
     AnalysisLogger,

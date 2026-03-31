@@ -4,11 +4,6 @@
 # The visualisation is logged to Weights & Biases (wandb) for easy inspection.
 
 
-# This script visualises the routing paths of tokens through the experts in a MoP model.
-# It loads a pretrained NeoBERT model, runs it on a test dataset, and visualises 
-# which experts are used for each token in the input. 
-# The visualisation is logged to Weights & Biases (wandb) for easy inspection.
-
 from datetime import datetime
 from ..tokenizer import get_tokenizer
 import torch

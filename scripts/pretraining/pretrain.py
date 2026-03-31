@@ -1,8 +1,4 @@
 import hydra
-"""
-Entry point for NeoBERT pretraining using Hydra configuration.
-Wraps the main training pipeline and loads config from conf/pretraining.yaml.
-"""
 from omegaconf import DictConfig
 
 from neobert.pretraining import trainer

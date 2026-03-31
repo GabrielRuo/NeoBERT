@@ -1,11 +1,8 @@
 #
 """
 Analysis utilities for visualizing and analyzing token routing pathways in NeoBERT models.
-Includes functions for pathway extraction and visualization.
+Includes functions for pathway extraction and visualization. Focused on applying PCA to routing patterns
 """
-# from pyexpat import model
-
-# from NeoBERT.NeoBERT_dev.src.neobert.pretraining import metrics
 from datetime import datetime
 from ..tokenizer import get_tokenizer
 from transformers import BertModel, BatchEncoding
@@ -14,8 +11,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from ..dataloader import get_dataloader
 from ..model import NeoBERTLMHead, NeoBERTConfig
-from ..optimizer import get_optimizer
-from ..scheduler import get_scheduler
 
 from tqdm import tqdm
 
@@ -23,10 +18,9 @@ from accelerate import Accelerator
 from accelerate.utils import DistributedType, ProjectConfiguration, set_seed
 from accelerate.utils import DistributedDataParallelKwargs
 
-from peft import LoraConfig, get_peft_model, TaskType
 
 from ..dataset import get_dataset
-from omegaconf import OmegaConf, DictConfig
+from omegaconf import OmegaConf
 import os
 import datetime
 import matplotlib.pyplot as plt
