@@ -1,13 +1,3 @@
-# Modal Pipeline Overview
-
-This project is designed to run large-scale pretraining and evaluation jobs on [Modal](https://modal.com/). The workflow is structured as follows:
-
-- **Scripts** (e.g., `scripts/pretraining/pretrain_modal_multi.py`) serve as entrypoints for launching jobs. These scripts handle argument parsing, sweep logic, and job submission.
-- **Modal Runner** (`src/neobert/modal_runner.py`) defines Modal `app` and `@app.function` objects. These functions encapsulate the main training, evaluation, and utility flows, and are responsible for setting up the Modal environment (volumes, secrets, images, etc.).
-- **Core Code** (`src/neobert/`) contains the actual model, training, and evaluation logic. The Modal functions in `modal_runner.py` call into this codebase to execute the desired pipeline.
-
-**Key Point:**
-> The scripts do not run training directly; instead, they submit jobs to Modal by calling functions defined in `modal_runner.py`, which in turn invoke the core logic in `src/neobert`. This separation allows for scalable, cloud-based execution while keeping the code modular and maintainable.
 
 # NeoBERT
 
@@ -121,6 +111,59 @@ The test suite uses these markers:
 - `e2e`: full pipeline integration
 - `slow`: long-running tests
 - `smoke`: quick sanity checks
+
+
+## Modal Pipeline Overview
+
+This project is designed to run large-scale pretraining and evaluation jobs on [Modal](https://modal.com/). The workflow is structured as follows:
+
+- **Scripts** (e.g., `scripts/pretraining/pretrain_modal_multi.py`) serve as entrypoints for launching jobs. These scripts handle argument parsing, sweep logic, and job submission.
+- **Modal Runner** (`src/neobert/modal_runner.py`) defines Modal `app` and `@app.function` objects. These functions encapsulate the main training, evaluation, and utility flows, and are responsible for setting up the Modal environment (volumes, secrets, images, etc.).
+- **Core Code** (`src/neobert/`) contains the actual model, training, and evaluation logic. The Modal functions in `modal_runner.py` call into this codebase to execute the desired pipeline.
+
+**Key Point:**
+> The scripts do not run training directly; instead, they submit jobs to Modal by calling functions defined in `modal_runner.py`, which in turn invoke the core logic in `src/neobert`. This separation allows for scalable, cloud-based execution while keeping the code modular and maintainable.
+
+## Example: Launching Pretraining on Modal
+
+You can launch pretraining jobs on Modal using the provided scripts. Configurations are stored in YAML files under `conf/`, but any value can be overridden from the command line. For sweepable variables (see `SWEEP_KEYS` in the script), you can specify multiple values as a comma-separated list in the CLI, or as a YAML list in the config.
+
+### Single Run (pretrain_modal.py)
+
+Launch a single pretraining job with custom overrides:
+
+```bash
+python scripts/pretraining/pretrain_modal.py model_type=mop model.hidden_size=768 trainer.max_steps=100
+```
+
+This will use the base config from `conf/pretraining_mop.yaml` and override `model.hidden_size` and `trainer.max_steps`.
+
+### Sweep Run (pretrain_modal_multi.py)
+
+Launch a sweep over multiple values for a variable (e.g., `model.loss.cost_based_loss_alpha_end`):
+
+```bash
+python scripts/pretraining/pretrain_modal_multi.py model_type=mop model.loss.cost_based_loss_alpha_end=4e-8,4e-7,4e-6 trainer.max_steps=100
+```
+
+This will launch one job for each value of `model.loss.cost_based_loss_alpha_end`. You can sweep over multiple variables at once by providing comma-separated values for each.
+
+### YAML List Example
+
+You can also specify sweep values in the YAML config:
+
+```yaml
+model:
+      loss:
+            cost_based_loss_alpha_end: [4e-8, 4e-7, 4e-6]
+```
+
+The script will automatically detect and sweep over these values.
+
+**Note:**
+- CLI overrides take precedence over YAML config values.
+- For sweeps, always use comma-separated values in the CLI (no brackets), and YAML lists in config files.
+
 
 ## How to use
 
