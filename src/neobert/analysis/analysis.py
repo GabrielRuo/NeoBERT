@@ -1,7 +1,8 @@
 """
-Analysis utilities for NeoBERT model outputs and training.
+Analysis classes for NeoBERT model outputs and training.
 Provides logging, metric computation, and visualization for model analysis and debugging.
 """
+
 import torch
 from typing import Union
 from torch.nn import CrossEntropyLoss

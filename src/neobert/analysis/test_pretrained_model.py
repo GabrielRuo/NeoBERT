@@ -1,8 +1,3 @@
-#
-"""
-Test harness for evaluating pretrained NeoBERT models.
-Runs tests, computes metrics, and logs results for model validation.
-"""
 import os
 import random
 
