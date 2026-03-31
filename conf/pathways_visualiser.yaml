@@ -1,0 +1,34 @@
+defaults:
+  - _self_
+  - dataset: minipile_pathways_visualiser
+  - dataloader: dataloader_pathways_visualiser
+  - datacollator: base
+
+seed: 0
+
+modal:
+  run_on_modal: false
+
+num_batches_to_visualise:  1
+max_print_tokens_per_batch: 9
+
+saved_model:
+  base_path: /runs/logs/checkpoints/mop_2025-12-02_16-36-59/
+  checkpoint: '40000'
+
+hydra:
+  run:
+    dir: logs/hydra
+
+wandb:
+  resume: never
+  name: null
+  project: MoP
+  entity: gabriel-ruault-centralesup-lec
+  tags: []
+  dir: logs/wandb
+  mode: online
+
+
+
+

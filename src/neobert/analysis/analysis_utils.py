@@ -7,6 +7,49 @@ import pandas as pd
 from ..tokenizer import get_tokenizer
 import numpy as np
 
+def get_expert_mask(
+    gate_logits,
+    routing_strategy,
+    num_experts_per_tok_inference=2,
+    min_expert_cumprob_per_token=0.4,
+):
+    """Convert gate logits to a binary mask of selected experts based on the specified routing strategy.
+    top k: select the top k experts with highest routing weights for each token.
+    top p: select the top experts whose cumulative routing weight exceeds a certain threshold p for each token.
+    """
+
+    if isinstance(gate_logits, tuple):
+        compute_device = gate_logits[0].device
+        stacked_gate_logits = torch.stack(
+            [layer_gate.to(compute_device) for layer_gate in gate_logits], dim=0
+        )  # n_layers, batch_size*seq_length, n_experts
+        _, _, num_experts = stacked_gate_logits.shape
+    routing_weights = torch.nn.functional.softmax(stacked_gate_logits, dim=-1)
+
+    if routing_strategy == "top_k":
+        top_k = num_experts_per_tok_inference  # if we wanted  to use top_k for heterogeneous moe
+        _, selected_experts = torch.topk(routing_weights, top_k, dim=-1)
+        target_expert_mask = torch.nn.functional.one_hot(
+            selected_experts, num_experts
+        ).sum(
+            2
+        )  # n_layers, batch_size*seq_length, n_experts
+
+    elif routing_strategy == "top_p":
+        top_p = min_expert_cumprob_per_token
+        sorted_weights, sorted_indices = torch.sort(
+            routing_weights, dim=-1, descending=False
+        )
+
+        cum_probs = sorted_weights.cumsum(dim=-1)
+        mask = cum_probs > 1 - top_p
+
+        unsorted_mask = torch.zeros_like(mask, dtype=torch.bool)
+        target_expert_mask = unsorted_mask.scatter(
+            dim=-1, index=sorted_indices, src=mask
+        )  # n_layers, batch_size*seq_length, n_experts
+
+    return target_expert_mask  # n_layers, batch_size*n_seq, n_experts
 
 class AnalysisMetrics:
 

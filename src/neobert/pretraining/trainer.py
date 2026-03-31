@@ -35,6 +35,7 @@ from ..scheduler import get_scheduler
 from ..dataloader import get_dataloader
 from ..dataset import get_dataset
 from ..analysis import AnalysisTraining
+from ..utils import to_target_batch_size, _resolve_mixed_precision
 from .losses import (
     mop_loss_fn,
     hetero_moe_loss_fn,
@@ -43,69 +44,6 @@ from .losses import (
 )
 
 import wandb
-
-def _resolve_mixed_precision(requested_mixed_precision: str) -> str:
-    requested = str(requested_mixed_precision).lower()
-
-    if requested == "bf16" and torch.cuda.is_available() and not torch.cuda.is_bf16_supported():
-        warnings.warn(
-            "Requested bf16 but current CUDA device does not support it. Falling back to fp16."
-        )
-        return "fp16"
-
-    if requested in {"fp16", "bf16"} and not torch.cuda.is_available():
-        warnings.warn(
-            f"Requested {requested} but CUDA is not available. Falling back to no mixed precision."
-        )
-        return "no"
-
-    return requested
-
-
-def to_target_batch_size(
-    batch: BatchEncoding,
-    stored_batch: BatchEncoding,
-    target_size: int = 8,
-):
-    tmp = {}
-    batch_size = batch["input_ids"].shape[0]
-
-    # If the batch is to large, we store samples
-    if batch_size > target_size:
-        for key in batch.keys():
-            tmp[key] = torch.split(
-                batch[key], [target_size, batch_size - target_size], dim=0
-            )
-            batch[key] = tmp[key][0]
-            stored_batch[key] = (
-                tmp[key][1]
-                if stored_batch[key] is None
-                else torch.cat([tmp[key][1], stored_batch[key]], dim=0)
-            )
-
-    # If the batch is to small, we fetch stored samples
-    elif batch_size < target_size and stored_batch["input_ids"] is not None:
-        stored_batch_size = stored_batch["input_ids"].shape[0]
-        missing = target_size - batch_size
-
-        # Fetch only necessary samples if storage is larger than required
-        if missing < stored_batch_size:
-            for key in batch.keys():
-                stored_batch[key].to(batch[key].device)
-                tmp[key] = torch.split(
-                    stored_batch[key], [missing, stored_batch_size - missing], dim=0
-                )
-                batch[key] = torch.cat([batch[key], tmp[key][0]], dim=0)
-                stored_batch[key] = tmp[key][1]
-                stored_batch[key].to("cpu", non_blocking=True)
-
-        # Concatenate otherwise
-        else:
-            for key in batch.keys():
-                batch[key] = torch.cat([batch[key], stored_batch[key]], dim=0)
-                stored_batch[key] = None
-
-    return batch, stored_batch
 
 
 def trainer(cfg: DictConfig):

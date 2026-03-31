@@ -7,6 +7,7 @@ import wandb
 import yaml
 from omegaconf import OmegaConf
 import shutil
+from hydra import initialize, compose
 
 import os
 
@@ -88,7 +89,6 @@ training_data_volume = modal.Volume.from_name(
 #     subprocess.run(args, check=True)
 def run_pretrain(overrides: list[str], model_type: str) -> None:
     """Launch pretraining using the provided command arguments."""
-    from hydra import initialize, compose
     from neobert.pretraining import trainer
 
     with initialize(config_path="../conf", version_base=None):
@@ -109,8 +109,7 @@ def run_pretrain(overrides: list[str], model_type: str) -> None:
     timeout=TIMEOUT,
 )
 def run_predictor(overrides: list[str]) -> None:
-    """Launch pretraining using the provided command arguments."""
-    from hydra import initialize, compose
+    """Launch predict routing using the provided command arguments."""
     from neobert.predictor import predictor
 
     with initialize(config_path="../conf", version_base=None):
@@ -131,8 +130,7 @@ def run_predictor(overrides: list[str]) -> None:
     timeout=TIMEOUT,
 )
 def run_pathways_analysis(overrides: list[str]) -> None:
-    """Launch pretraining using the provided command arguments."""
-    from hydra import initialize, compose
+    """Launch pathways analysis using the provided command arguments."""
     from neobert.analysis.pathways import pathways_analysis
 
     with initialize(config_path="../conf", version_base=None):
@@ -153,32 +151,13 @@ def run_pathways_analysis(overrides: list[str]) -> None:
     timeout=TIMEOUT,
 )
 def run_difficulty(overrides: list[str]) -> None:
-    """Launch pretraining using the provided command arguments."""
-    from hydra import initialize, compose
+    """Launch difficulty measurement using the provided command arguments."""
     from neobert.difficulty import measure_difficulty
 
     with initialize(config_path="../conf", version_base=None):
         config_name = "difficulty"
         cfg_dif = compose(config_name=config_name, overrides=overrides)
         measure_difficulty(cfg_dif)
-
-
-@app.function(
-    image=experiment_image,
-    secrets=[wandb_secret, huggingface_secret],
-    gpu="T4",
-    volumes={
-        "/data": training_data_volume,
-        "/runs": runs_volume,
-        # "/conf": config_volume,
-    },
-    timeout=TIMEOUT,
-)
-def run_correlations() -> None:
-    from neobert.correlations import compute_correlations_across_list_of_models
-
-    compute_correlations_across_list_of_models()
-
 
 @app.function(
     image=experiment_image,
@@ -210,7 +189,6 @@ def run_analyses_pretrained() -> None:
 )
 def run_pretrain_sweep(overrides: list[str], model_type: str) -> None:
     """Launch pretraining using the provided command arguments."""
-    from hydra import initialize, compose
     from neobert.pretraining import train_and_eval_sweep
 
     with initialize(config_path="../conf", version_base=None):
@@ -238,8 +216,7 @@ def run_pretrain_sweep(overrides: list[str], model_type: str) -> None:
     timeout=TIMEOUT,
 )
 def run_glue(overrides: list[str]) -> None:
-    """Launch pretraining using the provided command arguments."""
-    from hydra import initialize, compose
+    """Launch finetuning using the provided command arguments."""
     from neobert.glue import trainer
 
     with initialize(config_path="../conf", version_base=None):
@@ -270,11 +247,31 @@ def delete_in_volume(remote_dir: str):
     timeout=TIMEOUT,
 )
 def run_pretrained_model_tester(overrides: list[str]) -> None:
-    """Launch pretraining using the provided command arguments."""
-    from hydra import initialize, compose
+    """Launch testing of pretrained models using the provided command arguments."""
     from neobert.analysis import pretrained_model_tester
 
     with initialize(config_path="../conf", version_base=None):
         config_name = "tester"
         cfg_tester = compose(config_name=config_name, overrides=overrides)
         pretrained_model_tester(cfg_tester)
+
+@app.function(
+    image=experiment_image,
+    secrets=[wandb_secret, huggingface_secret],
+    gpu="T4",
+    volumes={
+        "/data": training_data_volume,
+        "/runs": runs_volume,
+        # "/conf": config_volume,
+    },
+    timeout=TIMEOUT,
+)
+def run_visualise_pathways(overrides: list[str]) -> None:
+    """Launch pathways analysis using the provided command arguments."""
+    
+    from neobert.analysis.pathways_visualiser import visualise_pathways
+
+    with initialize(config_path="../conf", version_base=None):
+        config_name = "pathways_visualiser"
+        cfg_pathways_visualiser = compose(config_name=config_name, overrides=overrides)
+        visualise_pathways(cfg_pathways_visualiser)
