@@ -1,3 +1,7 @@
+"""
+Script to launch NeoBERT token routing pathway analysis via Modal or locally.
+Handles config loading and remote execution for pathway visualization.
+"""
 import sys
 
 cli_arguments = sys.argv[1:]

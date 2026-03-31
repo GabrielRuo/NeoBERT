@@ -3,6 +3,10 @@ import sys
 cli_arguments = sys.argv[1:]
 
 
+"""
+Script to launch NeoBERT difficulty measurement via Modal or locally.
+Handles config loading and remote execution for difficulty analysis.
+"""
 
 from hydra import initialize, compose
 with initialize(config_path="../../conf", version_base=None):

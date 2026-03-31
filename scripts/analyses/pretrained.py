@@ -5,6 +5,16 @@ cli_arguments = sys.argv[1:]
 
 
 from hydra import initialize, compose
+"""
+Script to launch NeoBERT pretrained model analysis via Modal or locally.
+Handles config loading and remote execution for pretrained model analysis.
+"""
+import sys
+
+cli_arguments = sys.argv[1:]
+
+
+from hydra import initialize, compose
 with initialize(config_path="../../conf", version_base=None):
     config_name = "tester"
     cfg_tester = compose(config_name=config_name, overrides=cli_arguments)
