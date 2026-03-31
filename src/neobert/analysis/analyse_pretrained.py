@@ -1,3 +1,8 @@
+#
+"""
+Analysis script for evaluating pretrained NeoBERT models.
+Loads models, runs analysis, and logs results to Weights & Biases (wandb).
+"""
 # load  pretrained model from modal
 import os
 from pdb import run
