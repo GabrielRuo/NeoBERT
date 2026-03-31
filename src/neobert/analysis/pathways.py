@@ -1,3 +1,8 @@
+#
+"""
+Analysis utilities for visualizing and analyzing token routing pathways in NeoBERT models.
+Includes functions for pathway extraction and visualization.
+"""
 # from pyexpat import model
 
 # from NeoBERT.NeoBERT_dev.src.neobert.pretraining import metrics

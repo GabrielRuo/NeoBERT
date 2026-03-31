@@ -1,3 +1,8 @@
+#
+"""
+Helper functions and utilities for NeoBERT analysis modules.
+Includes expert mask computation and metric helpers for routing analysis.
+"""
 import torch
 from typing import Union
 from torch.nn import CrossEntropyLoss, MSELoss
