@@ -1,3 +1,5 @@
+#NOTE: CAREFUL this code is meant to donwload runs from modal to your local environement. It is however FLAWED and can deelete saved runs on modal if you are not careful.
+
 import os
 from pathlib import Path
 import modal
