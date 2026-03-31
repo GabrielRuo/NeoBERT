@@ -1,3 +1,14 @@
+# Modal Pipeline Overview
+
+This project is designed to run large-scale pretraining and evaluation jobs on [Modal](https://modal.com/). The workflow is structured as follows:
+
+- **Scripts** (e.g., `scripts/pretraining/pretrain_modal_multi.py`) serve as entrypoints for launching jobs. These scripts handle argument parsing, sweep logic, and job submission.
+- **Modal Runner** (`src/neobert/modal_runner.py`) defines Modal `app` and `@app.function` objects. These functions encapsulate the main training, evaluation, and utility flows, and are responsible for setting up the Modal environment (volumes, secrets, images, etc.).
+- **Core Code** (`src/neobert/`) contains the actual model, training, and evaluation logic. The Modal functions in `modal_runner.py` call into this codebase to execute the desired pipeline.
+
+**Key Point:**
+> The scripts do not run training directly; instead, they submit jobs to Modal by calling functions defined in `modal_runner.py`, which in turn invoke the core logic in `src/neobert`. This separation allows for scalable, cloud-based execution while keeping the code modular and maintainable.
+
 # NeoBERT
 
 ## Description
@@ -11,48 +22,8 @@ NeoBERT is a **next-generation encoder** model for English text representation, 
 
 ### Recommended: open in a Dev Container
 
-For the most reproducible local workflow, open this repository in a VS Code Dev Container.
-This ensures you use the same OS and dependency setup as the documented commands and tests.
-
-In VS Code:
-
-1. Install the **Dev Containers** extension.
-2. Run **Dev Containers: Reopen in Container** from the Command Palette.
-3. Wait for the container to build, then run commands from `/workspace`.
-
-Ensure you have the following dependencies installed:
-
-```bash
-pip install transformers torch xformers==0.0.28.post3
-```
-
-If you would like to use sequence packing (un-padding), you will need to also install flash-attention:
-
-```bash
-pip install transformers torch xformers==0.0.28.post3 flash_attn
-```
-
 ## Testing Pipeline
 
-### Optional local Git gates with pre-commit
-
-Use `pre-commit` to enforce fast checks before commit/push:
-
-- Commit gate: file hygiene checks + `black` on changed Python files.
-- Push gate: `pytest -m local -q`.
-
-Install and enable hooks:
-
-```bash
-pip install pre-commit
-pre-commit install --hook-type pre-commit --hook-type pre-push
-```
-
-Run all configured hooks manually:
-
-```bash
-pre-commit run --all-files
-```
 
 When cloning this repo, run tests in 3 stages. This gives fast feedback first,
 then validates external dependencies, and finally validates the full online path.
@@ -77,7 +48,6 @@ These tests should pass without network access when local caches/checkpoints are
 ```bash
 pytest -m local -q
 ```
-
 Host one-liner:
 
 ```bash
@@ -88,6 +58,7 @@ This currently includes:
 
 - `tests/test_pretrain_smoke.py`
 - `tests/test_predictor_smoke.py`
+- `tests/test_offline_e2e.py`
 
 ### 2) External connectivity tests (HF, W&B, Modal)
 
@@ -135,73 +106,10 @@ Host one-liner:
 docker compose exec modal-like bash -lc "cd /workspace && RUN_EXTERNAL_E2E=1 pytest tests/test_external_e2e.py -q -m 'external and e2e'"
 ```
 
-Useful overrides:
-
-- `PREDICT_ROUTING_E2E_TIMEOUT` (default: `3600` seconds)
-- `PREDICT_ROUTING_E2E_SCRIPT` (default: `scripts/analyses/predict_routing.py`)
-- `PREDICT_ROUTING_E2E_OVERRIDES` (space-separated Hydra overrides)
-
 Example:
 
 ```bash
-PREDICT_ROUTING_E2E_OVERRIDES="saved_model.checkpoint=mop_100" RUN_EXTERNAL_E2E=1 pytest tests/test_external_e2e.py -q
-```
-
-### Suggested CI / release cadence
-
-- Per-PR: `pytest -m local -q`
-- Daily scheduled: `RUN_EXTERNAL_TESTS=1 pytest tests/test_external_connectivity.py -q`
-- Nightly or pre-release: `RUN_EXTERNAL_E2E=1 pytest tests/test_external_e2e.py -q -m "external and e2e"`
-
-### 4) Full offline E2E tests (slow, opt-in, local assets only)
-
-Runs real script entrypoints end-to-end in offline mode for both:
-
-- predict-routing pipeline (`scripts/analyses/predict_routing.py`)
-- pretraining pipeline (`scripts/pretraining/pretrain.py`)
-
-```bash
-RUN_OFFLINE_E2E=1 pytest tests/test_offline_e2e.py -q -m "local and e2e"
-```
-
-Host one-liner:
-
-```bash
-docker compose exec modal-like bash -lc "cd /workspace && RUN_OFFLINE_E2E=1 pytest tests/test_offline_e2e.py -q -m 'local and e2e'"
-```
-
-Predict-routing offline E2E env vars:
-
-- `PREDICT_ROUTING_OFFLINE_E2E_BASE_PATH` (default: `/runs/logs/checkpoints/mop_2025-12-02_16-36-59/`)
-- `PREDICT_ROUTING_OFFLINE_E2E_CHECKPOINT` (default: `40000`)
-- `PREDICT_ROUTING_OFFLINE_E2E_TRAIN_DATASET_PATH` (default: `/data/.pathways_cache/jeankaddourminipiletrain_100`)
-- `PREDICT_ROUTING_OFFLINE_E2E_TEST_DATASET_PATH` (default: same as train dataset path)
-- `PREDICT_ROUTING_OFFLINE_E2E_TIMEOUT` (default: `3600` seconds)
-- `PREDICT_ROUTING_OFFLINE_E2E_SCRIPT` (default: `scripts/analyses/predict_routing.py`)
-- `PREDICT_ROUTING_OFFLINE_E2E_OVERRIDES` (space-separated Hydra overrides)
-
-Pretraining offline E2E env vars:
-
-- `PRETRAIN_OFFLINE_E2E_SCRIPT` (default: `scripts/pretraining/pretrain.py`)
-- `PRETRAIN_OFFLINE_E2E_TIMEOUT` (default: `3600` seconds)
-- `PRETRAIN_OFFLINE_E2E_TOKENIZER` (default: `google-bert/bert-base-uncased`, must exist in local cache)
-- `PRETRAIN_OFFLINE_E2E_OVERRIDES` (space-separated Hydra overrides)
-
-Predict-routing example with custom local assets:
-
-```bash
-PREDICT_ROUTING_OFFLINE_E2E_BASE_PATH=/runs/logs/checkpoints/my_run \
-PREDICT_ROUTING_OFFLINE_E2E_CHECKPOINT=latest \
-PREDICT_ROUTING_OFFLINE_E2E_TRAIN_DATASET_PATH=/data/my_train_ds \
-PREDICT_ROUTING_OFFLINE_E2E_TEST_DATASET_PATH=/data/my_test_ds \
-RUN_OFFLINE_E2E=1 pytest tests/test_offline_e2e.py -q
-```
-
-Pretraining example with custom overrides:
-
-```bash
-PRETRAIN_OFFLINE_E2E_OVERRIDES="model.hidden_size=16 model.num_hidden_layers=2" \
-RUN_OFFLINE_E2E=1 pytest tests/test_offline_e2e.py -q
+RUN_EXTERNAL_E2E=1 pytest tests/test_external_e2e.py -q
 ```
 
 ### Pytest markers
