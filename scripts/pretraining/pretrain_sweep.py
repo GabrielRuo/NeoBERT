@@ -1,9 +1,10 @@
+#Use the sweep property from modal to run a sweep of different pretraining experiments.
+#In practice pretrain_modal_multi.py is faster and does the same thing
+
+
 import sys
 
 cli_arguments = sys.argv[1:]
-
-
-
 
 model_type, cli_overrides = get_arg_value("model_type", cli_arguments)
 from hydra import initialize, compose

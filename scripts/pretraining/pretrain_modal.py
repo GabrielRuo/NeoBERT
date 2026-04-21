@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 # Make sure your .env file contains:
 #   HF_TOKEN=your_huggingface_token_here
 #   WANDB_API_KEY=your_wandb_api_key_here
+#If using docker container, the env variables should  already be loaded
+#into the container
 load_dotenv()
 
 cli_arguments = sys.argv[1:]
