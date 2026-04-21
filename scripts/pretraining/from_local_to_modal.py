@@ -7,8 +7,8 @@ from typing import Union
 import shutil
 import sys
 
-# Local target directory
-local_logs_dir = Path(__file__).parent.parent / "src" / "neobert" / "runs" / "logs"
+# Local target directory under the repository workspace.
+local_logs_dir = Path(__file__).resolve().parents[2] / "runs" / "logs"
 local_logs_dir.mkdir(parents=True, exist_ok=True)
 
 
