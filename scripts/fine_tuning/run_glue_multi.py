@@ -1,78 +1,115 @@
+"""
+NeoBERT Modal Multi GLUE Launcher
+---------------------------------
+
+Sweep Variable Behavior:
+-----------------------
+- The SWEEP_KEYS list defines which config variables can be swept over.
+- For each SWEEP_KEY, values are resolved in this order:
+    1. CLI comma-separated values (e.g. key=1e-4,1e-5)
+    2. YAML list values from the Hydra config
+    3. Single scalar value
+- Each launched run always receives a single value per sweep key.
+"""
+
+import itertools
 import sys
+
 import modal
+from hydra import compose, initialize
+from omegaconf import OmegaConf
+
 from neobert.modal_runner import app, run_glue
 
 
 # ------------------------------------------------
-# CLI argument parsing
+# Generalized hyperparameter grid search
 # ------------------------------------------------
-# def get_arg_value(key, cli_arguments):
-#     for arg_index, arg in enumerate(cli_arguments):  # skip script name
-#         if arg.startswith(f"{key}="):
-#             model_type_str = arg.split("=", 1)[1].strip('"').strip("'")
-#             cli_overrides = cli_arguments[:arg_index] + cli_arguments[arg_index + 1 :]
-#             if model_type_str in ["mop", "hetero_moe", "homo_moe"]:
-#                 return model_type_str, cli_overrides
-#             else:
-#                 raise ValueError(
-#                     "Error: invalid model type. Must be 'mop', 'hetero_moe', or 'homo_moe'"
-#                 )
-#     raise ValueError(
-#         "Error: no model_type given. Must be 'mop', 'hetero_moe', or 'homo_moe'"
-#     )
+
+# Define sweepable variable keys (values come from config/overrides)
+SWEEP_KEYS = [
+    "model.loss.cost_based_loss_alpha_end",
+    "model.loss.load_balancing_loss_coeff",
+]
 
 
-# ------------------------------------------------
-# Hyperparameter grids
-# ------------------------------------------------
-# alpha_start_list = [5e-10]
-# alpha_end_list = [2e-7,1e-7,5e-8, 2e-8,1e-8]
-# schedule_list = [2500000, 3000000, 3500000]
-# cost_exponent_list = [1,1.5,2]
+def parse_cli_sweep(cli_overrides, sweep_keys):
+    """Return a dict: key -> list of values (if supplied via CLI), else None."""
+    sweep_cli = {}
+    for key in sweep_keys:
+        for arg in cli_overrides:
+            if arg.startswith(f"{key}="):
+                val = arg.split("=", 1)[1].strip()
+                if val.startswith("[") and val.endswith("]"):
+                    val = val[1:-1]
 
-# alpha_start_list = [5e-10]
-# alpha_end_list = [1e-9,2e-8,3e-8,4e-8,7e-8,2e-7,3e-7,4e-7,5e-7,6e-7,7e-7,1e-6,5e-6,1e-5]
-# alpha_scaling_list = [0.0,1.0,5.0]
-# schedule_list = [2500000]
-# cost_exponent_list = [2]
-import numpy as np
+                if "," in val:
+                    vals = [v.strip() for v in val.split(",")]
 
-alpha_end_list = list(np.array([4e-7, 4e-8, 4e-9, 4e-10]))
-alpha_load_balancing_list = list(np.array([1e-3, 1e-2, 1e-1]))
-# alpha_end_list = list(np.array([0.0,5e-9,8e-9,2e-8,4e-8,7e-8,9e-8,2e-7,4e-7,6e-7,8e-7,1e-6,5e-6,1e-5])/5)
-# alpha_scaling_list = [0.0]
-# schedule_list = [2500000]
-# cost_exponent_list = [2]
+                    def try_num(x):
+                        try:
+                            return float(x)
+                        except Exception:
+                            return x
 
-# alpha_start_list = [5e-10]
-# alpha_end_list = [4e-8]
-# alpha_scaling_list = [0.0]
-# schedule_list = [2500000]
-# cost_exponent_list = [2]
+                    sweep_cli[key] = [try_num(v) for v in vals]
+                else:
+                    try:
+                        sweep_cli[key] = [float(val)]
+                    except Exception:
+                        sweep_cli[key] = [val]
+                break
+        else:
+            sweep_cli[key] = None
+    return sweep_cli
 
 
-# ------------------------------------------------
-# Launch many jobs on Modal
-# ------------------------------------------------
 def run_many(cli_overrides_base):
+    sweep_cli = parse_cli_sweep(cli_overrides_base, SWEEP_KEYS)
+
+    # Remove sweep keys from base overrides so each run gets one scalar per key.
+    filtered_cli = [
+        arg
+        for arg in cli_overrides_base
+        if not any(arg.startswith(f"{k}=") for k in SWEEP_KEYS)
+    ]
+
+    with initialize(config_path="../../conf", version_base=None):
+        cfg = compose(config_name="glue_mop", overrides=filtered_cli)
+        value_lists = []
+
+        for key in SWEEP_KEYS:
+            if sweep_cli[key] is not None:
+                value_lists.append(sweep_cli[key])
+                continue
+
+            try:
+                val = OmegaConf.select(cfg, key)
+            except Exception:
+                val = None
+
+            if val is None:
+                value_lists.append([None])
+            elif isinstance(val, list):
+                value_lists.append(val)
+            else:
+                value_lists.append([val])
+
     futures = []
     with modal.enable_output(), app.run(detach=True):
-        for alpha_end in alpha_end_list:
-            for alpha_load_balancing in alpha_load_balancing_list:
-                overrides = cli_overrides_base + [
-                    f"model.loss.cost_based_loss_alpha_end={alpha_end}",
-                    f"model.loss.load_balancing_loss_coeff={alpha_load_balancing}",
-                ]
-                print(
-                    f"Launching run: "
-                    f"alpha_end={alpha_end}, "
-                    f"alpha_load_balancing={alpha_load_balancing}"
+        for values in itertools.product(*value_lists):
+            overrides = filtered_cli + [
+                f"{k}={v}" for k, v in zip(SWEEP_KEYS, values) if v is not None
+            ]
+            print(
+                "Launching run: "
+                + ", ".join(
+                    f"{k}={v}" for k, v in zip(SWEEP_KEYS, values) if v is not None
                 )
-                # non-blocking launch
-                fut = run_glue.spawn(overrides=overrides)
-                futures.append(fut)
+            )
+            fut = run_glue.spawn(overrides=overrides)
+            futures.append(fut)
 
-        # (Optional) wait for results
         results = [f.get() for f in futures]
     return results
 
@@ -82,7 +119,5 @@ def run_many(cli_overrides_base):
 # ------------------------------------------------
 if __name__ == "__main__":
     cli_arguments = sys.argv[1:]  # exclude script name
-    # model_type, cli_overrides_base = get_arg_value("model_type", cli_arguments)
-
-    print(f"Running hyperparameter sweep")
+    print("Running hyperparameter sweep")
     run_many(cli_arguments)
