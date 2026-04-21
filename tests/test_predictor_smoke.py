@@ -9,6 +9,7 @@ import pytest
 from hydra import compose, initialize_config_dir
 
 predictor_module = import_module("neobert.predictor.predictor")
+utils_module = import_module("neobert.utils")
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -306,6 +307,8 @@ def test_predictor_one_step_end_to_end_smoke_monkeypatched(monkeypatch, tmp_path
 	monkeypatch.setattr(predictor_module, "BertModel", DummyBertFactory)
 	monkeypatch.setattr(predictor_module, "NeoBERTConfig", DummyNeoBERTConfig)
 	monkeypatch.setattr(predictor_module, "NeoBERTLMHead", DummyNeoBERTLMHead)
+	monkeypatch.setattr(utils_module, "NeoBERTConfig", DummyNeoBERTConfig)
+	monkeypatch.setattr(utils_module, "NeoBERTLMHead", DummyNeoBERTLMHead)
 	monkeypatch.setattr(predictor_module, "Accelerator", DummyAccelerator)
 	monkeypatch.setattr(predictor_module, "get_scheduler", lambda **kwargs: DummyScheduler())
 	monkeypatch.setattr(predictor_module, "get_tokenizer", lambda **kwargs: DummyTokenizer())
@@ -313,6 +316,7 @@ def test_predictor_one_step_end_to_end_smoke_monkeypatched(monkeypatch, tmp_path
 	monkeypatch.setattr(predictor_module, "get_dataloader", lambda *a, **k: [train_batch])
 	monkeypatch.setattr(predictor_module, "set_seed", lambda *args, **kwargs: None)
 	monkeypatch.setattr(predictor_module.torch, "load", lambda *args, **kwargs: {})
+	monkeypatch.setattr(utils_module.torch, "load", lambda *args, **kwargs: {})
 	monkeypatch.setattr(predictor_module.wandb, "run", SimpleNamespace(name=None), raising=False)
 
 	predictor_module.predictor(cfg_predictor)
