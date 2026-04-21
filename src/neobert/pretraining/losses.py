@@ -558,8 +558,6 @@ def general_mop_loss_fn_balanced(
                 cfg.model.loss.cost_based_loss_epsilon + task_loss.detach()
             )
             loss_denominator = loss_denominator**cfg.model.loss.denominator_exponent
-            print("loss denominator:", loss_denominator)
-            print("task loss:", task_loss)
             expert_loss = loss_numerator / loss_denominator
 
         train_loss = (
