@@ -47,6 +47,7 @@ train = [
     "scikit-learn==1.5.*",
     "peft>=0.11.1,<0.12.0",
     "matplotlib",
+    "evaluate==0.4.*",
 ]
 
 # Training stack without torch to allow explicit CPU/GPU torch install in Docker builds.
