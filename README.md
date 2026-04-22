@@ -12,7 +12,7 @@ NeoBERT is a **next-generation encoder** model for English text representation, 
 
 This project builds on top of the work done by Jack Cook on the Mixture of Pathways model
 
-- Paper[paper](https://arxiv.org/abs/2506.02813v1
+- Paper: [paper](https://arxiv.org/abs/2506.02813v1
 )
 
 It applies the idea in the context of modern day Mixture of Experts LLMs. 
@@ -34,11 +34,11 @@ defined by `docker-compose.yml` (service: `modal-like`).
 
 # Set up the Docker container
 
-1) Set up the Docker image 
+#### 1) Set up the Docker image 
 using  the information from ````Dockerfile```` with: 
 ```docker compose build```
 
-2) Check environment variables are present:
+#### 2) Check environment variables are present:
 For the next step to work, you need to make sure a `.env` file is present in the directory. This file contains the necessary environment variables such as
 
 - W&B: `WANDB_API_KEY`
@@ -46,8 +46,8 @@ For the next step to work, you need to make sure a `.env` file is present in the
 
 See the `.env.example` file for more detail
 
-3) Run the docker container 
-using the information from ````docker-compose.yaml```|
+#### 3) Run the docker container 
+using the information from `docker-compose.yaml`
 
 and open a bash CLI to run code from the container
 
@@ -98,7 +98,7 @@ the generated `token_id` and `token_secret` values into `.env`.
 
 ### 3) Full external E2E test (slow, opt-in)
 
-1) Loading a model locally
+#### 1) Loading a model locally
 If you want to push testing more deeply and run true pretraining steps and analysis of a pretrained model, you will need to load a pretrained model. If you have an existing model on the modal platform, you can download it locally using `download_results.py`
 
 Example:
@@ -106,7 +106,7 @@ python scripts/download_results/download_results.py base_path='mop_2025-12-02_16
 
 Note: the tests are expecting the specific `mop_2025-12-02_16-36-59` model to be loaded  but you can modify the local model path in `test_offline_e2e.py`
 
-2) running the end to end tests locally 
+#### 2) Running the end to end tests locally 
 
 ```bash
 RUN_EXTERNAL_E2E=1 pytest tests/test_external_e2e.py -q -m "external and e2e"
