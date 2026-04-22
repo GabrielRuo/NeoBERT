@@ -52,7 +52,7 @@ experiment_image = (
         Path(__file__).resolve().parents[2] / "pyproject.toml",
         optional_dependencies=MODAL_OPTIONAL_DEPS,
     )
-    .add_local_dir("../../conf", "/root/conf")
+    .add_local_dir(str(Path(__file__).resolve().parents[2] / "conf"), "/root/conf")
 )
 
 
