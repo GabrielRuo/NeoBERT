@@ -35,7 +35,8 @@ defined by `docker-compose.yml` (service: `modal-like`).
 # Set up the Docker container
 
 #### 1) Set up the Docker image  
-```docker compose build```
+```bash
+docker compose build```
 
 #### 2) Check environment variables are present:
 For the next step to work, you need to make sure a `.env` file is present in the directory. This file contains the necessary environment variables such as
@@ -49,7 +50,9 @@ See the `.env.example` file for more detail
 
 The following code launches the Docker container and opens a bash CLI to run code from the container
 
-````docker compose run modal-like bash````
+````bash
+docker compose run modal-like bash
+````
 
 Note: there are many alternatives to this step. It is also recommended to open a DevContainer.
 
@@ -99,7 +102,9 @@ the generated `token_id` and `token_secret` values into `.env`.
 If you want to push testing more deeply and run true pretraining steps and analysis of a pretrained model, you will need to load a pretrained model. If you have an existing model on the modal platform, you can download it locally using `download_results.py`
 
 Example:
+````bash
 python scripts/download_results/download_results.py base_path='mop_2025-12-02_16-36-59' checkpoints='40000' delete_in_modal=False
+```
 
 Note: the tests are expecting the specific `mop_2025-12-02_16-36-59` model to be loaded  but you can modify the local model path in `test_offline_e2e.py`
 
@@ -175,11 +180,15 @@ The script will automatically detect and sweep over these values.
 
 Example run: 
 
-```python run_glue.py model.pretrained_checkpoint_dir="'/runs/logs/checkpoints/mop_2025-12-02_16-36-59'" model.pretrained_checkpoint='40000' task=sst2 scheduler.warmup_percent=6 scheduler.decay_percent=90 wandb.resume=False trainer.mixed_precision=fp16 optimizer.hparams.lr=1e-5 optimizer.hparams.weight_decay=1e-2 trainer.train_batch_size=16 trainer.early_stopping=10 trainer.max_ckpt=5 model.random_init_model=False model.loss.cost_based_loss_alpha_end=4e-9 model.loss.load_balancing_loss_coeff=1e-2 modal.run_on_modal=False```
+```bash
+python run_glue.py model.pretrained_checkpoint_dir="'/runs/logs/checkpoints/mop_2025-12-02_16-36-59'" model.pretrained_checkpoint='40000' task=sst2 scheduler.warmup_percent=6 scheduler.decay_percent=90 wandb.resume=False trainer.mixed_precision=fp16 optimizer.hparams.lr=1e-5 optimizer.hparams.weight_decay=1e-2 trainer.train_batch_size=16 trainer.early_stopping=10 trainer.max_ckpt=5 model.random_init_model=False model.loss.cost_based_loss_alpha_end=4e-9 model.loss.load_balancing_loss_coeff=1e-2 modal.run_on_modal=False
+```
 
 ## Example: Launching Predict Routing on modal
 
-```python predict_routing.py saved_model.base_path="'/runs/logs/checkpoints/mop_2025-12-02_16-36-59'" saved_model.checkpoint="'40000'" trainer.max_steps=1 trainer.test_after_training=False```
+```bash
+python predict_routing.py saved_model.base_path="'/runs/logs/checkpoints/mop_2025-12-02_16-36-59'" saved_model.checkpoint="'40000'" trainer.max_steps=1 trainer.test_after_training=False
+```
 
 The rest of the README stems from the original NeoBERT repo README and is not specific to Mixture of Pathways.
 
