@@ -103,7 +103,7 @@ the generated `token_id` and `token_secret` values into `.env`.
 If you want to push testing more deeply and run true pretraining steps and analysis of a pretrained model, you will need to load a pretrained model. If you have an existing model on the modal platform, you can download it locally using `download_results.py`
 
 Example:
-````bash
+```bash
 python scripts/download_results/download_results.py base_path='mop_2025-12-02_16-36-59' checkpoints='40000' delete_in_modal=False
 ```
 
