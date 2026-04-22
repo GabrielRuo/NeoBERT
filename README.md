@@ -34,8 +34,7 @@ defined by `docker-compose.yml` (service: `modal-like`).
 
 # Set up the Docker container
 
-#### 1) Set up the Docker image 
-using  the information from ````Dockerfile```` with: 
+#### 1) Set up the Docker image  
 ```docker compose build```
 
 #### 2) Check environment variables are present:
@@ -46,12 +45,10 @@ For the next step to work, you need to make sure a `.env` file is present in the
 
 See the `.env.example` file for more detail
 
-#### 3) Run the docker container 
-using the information from `docker-compose.yaml`
+#### 3) Run the Docker container 
 
-and open a bash CLI to run code from the container
+The following code launches the Docker container and opens a bash CLI to run code from the container
 
-by running:
 ````docker compose run modal-like bash````
 
 Note: there are many alternatives to this step. It is also recommended to open a DevContainer.
