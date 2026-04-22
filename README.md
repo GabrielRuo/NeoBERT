@@ -36,7 +36,8 @@ defined by `docker-compose.yml` (service: `modal-like`).
 
 #### 1) Set up the Docker image  
 ```bash
-docker compose build```
+docker compose build
+```
 
 #### 2) Check environment variables are present:
 For the next step to work, you need to make sure a `.env` file is present in the directory. This file contains the necessary environment variables such as
