@@ -1,19 +1,30 @@
 
-# NeoBERT
+# NeoBERT and Mixture of Pathways LLM
 
-## Description
+## Description  NeoBERT
 
 NeoBERT is a **next-generation encoder** model for English text representation, pre-trained from scratch on the RefinedWeb dataset. NeoBERT integrates state-of-the-art advancements in architecture, modern data, and optimized pre-training methodologies. It is designed for seamless adoption: it serves as a plug-and-play replacement for existing base models, relies on an **optimal depth-to-width ratio**, and leverages an extended context length of **4,096 tokens**. Despite its compact 250M parameter footprint, it is the most efficient model of its kind and achieves **state-of-the-art results** on the massive MTEB benchmark, outperforming BERT large, RoBERTa large, NomicBERT, and ModernBERT under identical fine-tuning conditions. 
 
 - Paper: [paper](https://arxiv.org/abs/2502.19587)
 - Model: [huggingface](https://huggingface.co/chandar-lab/NeoBERT).
 
+## Description Mixture of Pathways LLM
+
+This project builds on top of the work done by Jack Cook on the Mixture of Pathways model
+
+- Paper[paper](https://arxiv.org/abs/2506.02813v1
+)
+
+It applies the idea in the context of modern day Mixture of Experts LLMs. 
+
 ## Get started
 
+Clone the repository from https://github.com/GabrielRuo/NeoBERT
+
 ### Recommended: open in a Dev Container
+The whole Docker pipeline is here to make running code locally and remotely (on modal here) equivalent, enabling easy testing and hence allowing coding agents to work more effectively.
 
 ## Testing Pipeline
-
 
 When cloning this repo, run tests in 3 stages. This gives fast feedback first,
 then validates external dependencies, and finally validates the full online path.
@@ -21,15 +32,29 @@ then validates external dependencies, and finally validates the full online path
 All test commands below are intended to be run from the Docker container
 defined by `docker-compose.yml` (service: `modal-like`).
 
-Start and enter the container:
+# Set up the Docker container
 
-```bash
-docker compose up -d modal-like
-docker compose exec modal-like bash
-cd /workspace
-```
+1) Set up the Docker image 
+using  the information from ````Dockerfile```` with: 
+```docker compose build```
 
-Alternatively, run tests directly from the host with `docker compose exec` one-liners.
+2) Check environment variables are present:
+For the next step to work, you need to make sure a `.env` file is present in the directory. This file contains the necessary environment variables such as
+
+- W&B: `WANDB_API_KEY`
+- Modal: `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`
+
+See the `.env.example` file for more detail
+
+3) Run the docker container 
+using the information from ````docker-compose.yaml```|
+
+and open a bash CLI to run code from the container
+
+by running:
+````docker compose run modal-like bash````
+
+Note: there are many alternatives to this step. It is also recommended to open a DevContainer.
 
 ### 1) Local deterministic smoke tests (default)
 
@@ -37,11 +62,6 @@ These tests should pass without network access when local caches/checkpoints are
 
 ```bash
 pytest -m local -q
-```
-Host one-liner:
-
-```bash
-docker compose exec modal-like bash -lc "cd /workspace && pytest -m local -q"
 ```
 
 This currently includes:
@@ -57,12 +77,6 @@ which makes external failures easier to diagnose.
 
 ```bash
 RUN_EXTERNAL_TESTS=1 pytest tests/test_external_connectivity.py -q
-```
-
-Host one-liner:
-
-```bash
-docker compose exec modal-like bash -lc "cd /workspace && RUN_EXTERNAL_TESTS=1 pytest tests/test_external_connectivity.py -q"
 ```
 
 Expected environment variables:
@@ -84,22 +98,18 @@ the generated `token_id` and `token_secret` values into `.env`.
 
 ### 3) Full external E2E test (slow, opt-in)
 
-Runs the real `predict_routing.py` entrypoint with online mode enabled.
+1) Loading a model locally
+If you want to push testing more deeply and run true pretraining steps and analysis of a pretrained model, you will need to load a pretrained model. If you have an existing model on the modal platform, you can download it locally using `download_results.py`
+
+Example:
+python scripts/download_results/download_results.py base_path='mop_2025-12-02_16-36-59' checkpoints='40000' delete_in_modal=False
+
+Note: the tests are expecting the specific `mop_2025-12-02_16-36-59` model to be loaded  but you can modify the local model path in `test_offline_e2e.py`
+
+2) running the end to end tests locally 
 
 ```bash
 RUN_EXTERNAL_E2E=1 pytest tests/test_external_e2e.py -q -m "external and e2e"
-```
-
-Host one-liner:
-
-```bash
-docker compose exec modal-like bash -lc "cd /workspace && RUN_EXTERNAL_E2E=1 pytest tests/test_external_e2e.py -q -m 'external and e2e'"
-```
-
-Example:
-
-```bash
-RUN_EXTERNAL_E2E=1 pytest tests/test_external_e2e.py -q
 ```
 
 ### Pytest markers
@@ -164,6 +174,17 @@ The script will automatically detect and sweep over these values.
 - CLI overrides take precedence over YAML config values.
 - For sweeps, always use comma-separated values in the CLI (no brackets), and YAML lists in config files.
 
+## Example: Launching Finetuning on modal
+
+Example run: 
+
+```python run_glue.py model.pretrained_checkpoint_dir="'/runs/logs/checkpoints/mop_2025-12-02_16-36-59'" model.pretrained_checkpoint='40000' task=sst2 scheduler.warmup_percent=6 scheduler.decay_percent=90 wandb.resume=False trainer.mixed_precision=fp16 optimizer.hparams.lr=1e-5 optimizer.hparams.weight_decay=1e-2 trainer.train_batch_size=16 trainer.early_stopping=10 trainer.max_ckpt=5 model.random_init_model=False model.loss.cost_based_loss_alpha_end=4e-9 model.loss.load_balancing_loss_coeff=1e-2 modal.run_on_modal=False```
+
+## Example: Launching Predict Routing on modal
+
+```python predict_routing.py saved_model.base_path="'/runs/logs/checkpoints/mop_2025-12-02_16-36-59'" saved_model.checkpoint="'40000'" trainer.max_steps=1 trainer.test_after_training=False```
+
+The rest of the README stems from the original NeoBERT repo README and is not specific to Mixture of Pathways.
 
 ## How to use
 
